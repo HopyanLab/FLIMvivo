@@ -1,0 +1,16 @@
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_5.csv	Life time: 2.581ns	+/- 0.147ns	2.58067697
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_4.csv	Life time: 2.543ns	+/- 0.140ns	2.54343668
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_1.csv	Life time: 2.593ns	+/- 0.148ns	2.59324508
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_6.csv	Life time: 2.392ns	+/- 0.128ns	2.39178117
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_9.csv	Life time: 2.406ns	+/- 0.128ns	2.40583171
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_7.csv	Life time: 2.529ns	+/- 0.142ns	2.52940346
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_11.csv	Life time: 2.450ns	+/- 0.133ns	2.44953506
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_3.csv	Life time: 2.503ns	+/- 0.135ns	2.50282491
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_12.csv	Life time: 2.598ns	+/- 0.170ns	2.59802329
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_15.csv	Life time: 2.581ns	+/- 0.145ns	2.58140474
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_0.csv	Life time: 2.513ns	+/- 0.132ns	2.51329608
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_8.csv	Life time: 2.464ns	+/- 0.134ns	2.46422275
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_13.csv	Life time: 2.556ns	+/- 0.139ns	2.55647325
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_10.csv	Life time: 2.605ns	+/- 0.154ns	2.60471165
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_2.csv	Life time: 2.500ns	+/- 0.138ns	2.50042092
+/home/evan/Documents/SickKids/FLIMvivo/Demo/FLIMseg-output/segments/segment_14.csv	Life time: 2.585ns	+/- 0.145ns	2.58523905
