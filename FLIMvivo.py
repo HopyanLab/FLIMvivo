@@ -1,90 +1,168 @@
 #!/usr/bin/env python3
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import optimize
-from scipy import integrate
+from matplotlib import pyplot as plt
+from matplotlib import gridspec
 from pathlib import Path
 import argparse
 import time
 import os
 
-import warnings
-warnings.filterwarnings("ignore")
-
 ################################################################################
-# Log Likelihood fitting for Poisson distributed data.
+#import warnings
+#warnings.filterwarnings("ignore")
 ################################################################################
 
-def LogLikelihood(p, X, Y):
-	A = p[0]
-	tau = p[1]
-	return (A*np.sum(np.exp(-X/tau)) - np.log(A)*np.sum(Y) + np.sum(Y*X/tau))
-
-def PoissonTauStdError(p, X, Y):
-	A = p[0]
-	tau = p[1]
-	I = np.sum(2*X*Y + (X*X/tau - 2*X)*A*np.exp(-X/tau))/tau**3
-	return 1/np.sqrt(I)#/np.sqrt(len(X))
-
-def LogLikelihoodFit(mask, X, Y, p0 = [1.,3.0]):
-	return optimize.fmin(LogLikelihood, p0,
-							args=(X[mask], Y[mask]),
-							disp=False, full_output=True)
+from math import factorial
+#from numba import jit
 
 ################################################################################
-# Log Likelihood fitting for Poisson distributed data with biexponential.
+# Functions used for fitting.
 ################################################################################
 
-def MultiLogLikelihood(p, X, Y):
-	A, tau1, B, tau2 = p
-	thetaX = np.log(A*np.exp(-X/tau1) + B*np.exp(-X/tau2))
-	return np.sum(np.exp(thetaX) - Y*thetaX)
+# Mono-Exponential model
+def ME(x,A,tau):
+	return A*np.exp(-x/tau)
 
-def MultiPoissonTauStdError(p, X, Y):
-	A, tau1, B, tau2 = p
-	thetaX = np.log(A*np.exp(-X/tau1) + B*np.exp(-X/tau2))
-	alpha = np.divide(B*np.exp(-X/tau2), np.exp(thetaX))
-	beta = Y - np.exp(thetaX)
-	I = np.sum(2/tau2**3*(X + X**2/tau2)*(alpha*beta) + \
-				(Y*X**2)/tau2**3*alpha**2)
-	# I = np.sum(alpha*beta/tau2**2)**2
-	return 1/np.sqrt(I)#/np.sqrt(len(X))
+# Bi-Exponential model
+def BE(x,A,tau1,B,tau2):
+	return A*np.exp(-x/tau1)+B*np.exp(-x/tau2)
 
-def MultiLogLikelihoodFit(mask, X, Y, p0 = [0.5, 0.5, 0.5, 3.0]):
-	return optimize.fmin(MultiLogLikelihood, p0,
-							args=(X[mask], Y[mask]),
-							disp=False, full_output=True)
+# Instrument Response Function assuming a gaussian profile
+def IRF(x,mu,sigma):
+	return np.exp(-(x-mu)**2/2/sigma**2)/sigma/np.sqrt(2*np.pi)
+
+# Mono-Exponential convolution
+def MEC(x,A,tau1,mu,sigma):
+	return np.fft.ifft(np.fft.fft(IRF(x,mu,sigma)) * \
+					np.fft.fft(ME(x,A,tau1))).real * (x[1]-x[0])
+
+# Bi-Exponential convolution
+def BEC(x,B,tau2,A,tau1,mu,sigma):
+	return np.fft.ifft(np.fft.fft(IRF(x,mu,sigma)) * \
+					np.fft.fft(BE(x,A,tau1,B,tau2))).real * (x[1]-x[0])
+
+# Negative Log-Likelihood estimator assuming Poisson statistics
+def NLL(p, X, Y, F, startpoint=0, endpoint=-1):
+	if endpoint == -1:
+		endpoint = len(X)
+	FX = F(X, *p)[startpoint:endpoint]
+	RY = Y[startpoint:endpoint]
+	return np.sum(FX - RY*np.log(FX)) / \
+						np.sqrt(endpoint - startpoint)
+
+#TODO: Not sure this is quite right!
+def CHI(p, X, Y, F, startpoint=0, endpoint=-1):
+	if endpoint == -1:
+		endpoint = len(X)
+	FX = F(X, *p)[startpoint:endpoint]
+	RY = Y[startpoint:endpoint]
+	return np.sum(np.divide((FX - RY)**2, FX)) / \
+									(endpoint - startpoint)
+#	return np.sum((FX - RY)**2) #/ (endpoint - startpoint)
+
+# Minimse the Negative Log-Likelihood for a given function and dataset
+def PerformFit(X, Y, F, p, startpoint=0, endpoint=-1, fit_type = 'NLL'):
+	if fit_type == 'NLL':
+		fit_function = lambda p, X, Y: NLL(p, X, Y, F, startpoint, endpoint)
+	else:
+		fit_function = lambda p, X, Y: CHI(p, X, Y, F, startpoint, endpoint)
+	return optimize.fmin(fit_function, p, args=(X, Y),
+						disp=False, full_output=True )
 
 ################################################################################
-# Log Likelihood fitting for Poisson distributed data with biexponential
-#  and a predefined autoflourescence timescale.
+# Weiner Deconvolution on data. Used for Tail Fitting.
 ################################################################################
 
-def MultiLogLikelihoodWithNoise(p, tau1, X, Y):
-	A, B, tau2 = p
-	thetaX = np.log(A*np.exp(-X/tau1) + B*np.exp(-X/tau2))
-	return np.sum(np.exp(thetaX) - Y*thetaX)
-
-def MultiPoissonTauStdErrorWithNoise(p, tau1, X, Y):
-	A, B, tau2 = p
-	thetaX = np.log(A*np.exp(-X/tau1) + B*np.exp(-X/tau2))
-	alpha = np.divide(B*np.exp(-X/tau2), np.exp(thetaX))
-	beta = Y - np.exp(thetaX)
-	I = np.sum(2/tau2**3*(X + X**2/tau2)*(alpha*beta) + \
-				(Y*X**2)/tau2**3*alpha**2)
-	# I = np.sum(alpha*beta/tau2**2)**2
-	return 1/np.sqrt(I)#/np.sqrt(len(X))
-
-def MultiLogLikelihoodFitWithNoise(mask, tau1, X, Y, p0 = [0.5, 0.5, 3.0]):
-	return optimize.fmin(MultiLogLikelihoodWithNoise, p0,
-							args=(tau1, X[mask], Y[mask]),
-							disp=False, full_output=True)
+def WeinerDeconvolution (time_points, data_points, mu, sigma, alpha = 60.):
+	time_zero = time_points(np.argmax(data_points)) - sigma
+	H = np.fft.fftshift(np.fft.fft(data_points))
+	G = np.fft.fftshift(np.fft.fft(IRF(time_points,time_zero,sigma)))
+	M = (np.conj(G)/(np.abs(G)**2 + alpha**2))*H
+	m = np.abs(H.shape[0]*np.fft.ifft(M).real)
+	return m/np.amax(m)
 
 ################################################################################
-# Fit a given CSV datafile.
+# Fit for different endpoints. Used for Tail and Fast Convoolution fitting.
 ################################################################################
 
-def ProcessFile(filepath, showfits, biexp, autolife):
+def FindEndpoint(time_points, data_points,
+					fit_function, guess_params,
+					startpoint = 0,
+					fit_type = 'NLL', # 'CHI' for Chi Square
+					coarse_N = 20, fine_N = 10):
+	peak_index = np.argmax(data_points)
+	peak_value = data_points[peak_index]
+	mask = data_points[peak_index:] < peak_value * 0.2
+	initial_index = peak_index + np.amin(np.where(mask))
+	index_range = len(time_points) - initial_index
+	total_N = coarse_N + fine_N
+	endpoints = np.zeros(total_N,dtype=int)
+	likelihoods = np.zeros(total_N)
+	fit_params = np.zeros((total_N,len(guess_params)))
+	for i in range(coarse_N):
+		endpoint = int(initial_index + np.floor(i*index_range/coarse_N))
+		endpoints[i] = endpoint
+		fit = PerformFit(time_points, data_points,
+						 fit_function, guess_params,
+						 startpoint = startpoint,
+						 endpoint = endpoint,
+						 fit_type = fit_type)
+		fit_params[i] = fit[0]
+		likelihoods[i] = fit[1]
+	iMax = np.argmax(likelihoods[:coarse_N])
+	fine_upper = min(len(time_points),
+				initial_index + np.floor((iMax+1)*index_range/coarse_N))
+	fine_lower = max(initial_index,
+				initial_index + np.floor((iMax-1)*index_range/coarse_N))
+	fine_range = fine_upper - fine_lower
+	for i in range(coarse_N, coarse_N + fine_N):
+		endpoint = int(fine_lower + np.floor((i-coarse_N)*fine_range/fine_N))
+		endpoints[i] = endpoint
+		fit = PerformFit(time_points, data_points,
+						 fit_function, guess_params,
+						 startpoint = startpoint,
+						 endpoint = endpoint,
+						 fit_type = fit_type)
+		fit_params[i] = fit[0]
+		likelihoods[i] = fit[1]
+	return fit_params, endpoints, likelihoods#/np.amax(likelihoods)
+
+################################################################################
+# Cut Data bassed on given thresholds as factor of peak
+################################################################################
+
+def CutData (time_points, data_points,
+				lower_threshold = 0.01,
+				upper_threshold = 0.01):
+	running_average = (data_points[np.argmax(data_points):-6] + \
+					   data_points[np.argmax(data_points)+1:-5] + \
+					   data_points[np.argmax(data_points)+2:-4] + \
+					   data_points[np.argmax(data_points)+3:-3] + \
+					   data_points[np.argmax(data_points)+4:-2] + \
+					   data_points[np.argmax(data_points)+5:-1])/6
+	peak_index = np.argmax(data_points)
+	peak_value = data_points[peak_index]
+	mask = running_average < peak_value * upper_threshold
+	if np.any(mask):
+		upper_bound = np.amin(np.where(mask)) + np.argmax(data_points)
+	else:
+		upper_bound = len(data_points) - 6
+	mask = data_points[10:np.argmax(data_points)] < peak_value * lower_threshold
+	lower_bound = 0
+	if np.any(mask):
+		lower_bound = np.amax(np.where(mask)) + 10
+	else:
+		lower_bound = np.argmax(data_points)-25
+	time_points = time_points[lower_bound:upper_bound]
+	data_points = data_points[lower_bound:upper_bound]
+	return time_points, data_points
+
+################################################################################
+# Process Datafile and Return Data
+################################################################################
+
+def ExtractData(filepath):
 	# Ignore any broken lines in the file.
 	fixedfilepath = Path(str(filepath) + '.fixed')
 	with open(fixedfilepath, 'w') as fixedfile, open(filepath, 'r') as infile:
@@ -92,307 +170,326 @@ def ProcessFile(filepath, showfits, biexp, autolife):
 			try:
 				t = float(line.split(',')[0])
 				x = float(line.split(',')[1])
-				fixedfile.write('{0:f},{1:f}'.format(t, x) + os.linesep)
+				fixedfile.write('{0:.12f},{1:.12f}'.format(t, x) + os.linesep)
 			except ValueError:
 				print('Bad line ({0:d}) in {1:s}:'.format(linenumber,
 															filepath.name))
 				print('\t', line)
 	if fixedfilepath.stat().st_size == 0:
-		return np.array([-1,-1])
-	# 
+		return None
 	data = np.genfromtxt(fixedfilepath, delimiter=',')
-	t = data[:,0]/1000. - data[np.argmax(data[:,1]),0]/1000.
-	y = data[:,1]/np.amax(data[:,1])
+	fixedfilepath.unlink()
+	# scale time data to nanoseconds (microscope gives picoseconds)
+	time_points = data[:,0]/1000.
+	data_points = data[:,1]
+	###################################################
+	## set peak time to zero. (this messes up FLIMseg)
+	# peak_index = np.argmax(data_points)
+	# time_zero = time_points[peak_index]
+	# time_points = time_points - time_zero
+	###################################################
 	# before the laser pulse gives a baseline noise estimate
-	y -= np.average(y[0:10])
-	coarseN = 20
-	fineN = 10
-	N = coarseN + fineN
-	fitmeasure = np.zeros(N)
-	tubs = np.zeros(N)
-	NoPs = np.zeros(N, dtype=int)
-	sols = np.zeros((N,2))
+	data_points -= np.average(data_points[5:20])
+	# scale maximum to unity
+	data_points = data_points/np.amax(data_points)
+	###################################################
+	return time_points, data_points
+
+################################################################################
+# Tail Fit
+################################################################################
+
+def TailFit(filepath,
+			biexp, autolife,
+			passed_mu, passed_sigma,
+			fit_type = 'NLL'):
+	time_points, data_points = ExtractData(datafilepath)
+	# if we know about the IRF do a Weiner deconvolution
+	if passed_mu != 0. and passed_sigma != 0.:
+		data_points = WeinerDeconvolution(time_points, data_points,
+											passed_mu, passed_sigma)
+	time_points, data_points = CutData(time_points, data_points)
+	peak_index = np.argmax(data_points)
+	peak_value = data_points[peak_index]
 	if biexp:
-		if autolife == 0.:
-			sols = np.zeros((N,4))
-		else:
-			sols = np.zeros((N,3))
-	#
-	tlb = t[np.argmax(y)]
-	t0 = t[np.argmax(y) + 36]
-	err = 0
-	for i in range(coarseN):
-		tub = t0 + i*(t[-1] - t0)/coarseN
-		tubs[i] = tub
-		mask = (t[:] > tlb) & (t[:] < tub)
-		NoPs[i] = len(np.where(mask)[0])
-		if biexp:
-			if autolife == 0.:
-				sols[i,:] = MultiLogLikelihoodFit(mask, t, y)[0]
-				fitmeasure[i] = np.abs(MultiLogLikelihood(sols[i,:],
-										t[mask], y[mask]) / \
-											np.sqrt(NoPs[i]))
-			else:
-				sols[i,:] = MultiLogLikelihoodFitWithNoise(mask,
-															autolife, t, y)[0]
-				fitmeasure[i] = np.abs(MultiLogLikelihoodWithNoise(sols[i,:],
-										autolife, t[mask], y[mask]) / \
-											np.sqrt(NoPs[i]))
-		else:
-			sols[i,:] = LogLikelihoodFit(mask, t, y)[0]
-			fitmeasure[i] = np.abs(LogLikelihood(sols[i,:],
-									t[mask], y[mask]) / \
-										np.sqrt(NoPs[i]))
-	iMax = np.argmax(fitmeasure)
-	tfineub = t0 + (iMax+1)*(t[-1] - t0)/coarseN
-	tfinelb = t0 + (iMax-1)*(t[-1] - t0)/coarseN
-	for i in range(fineN):
-		tub = tfinelb + i*(tfineub - tfinelb)/fineN
-		tubs[i+coarseN] = tub
-		mask = (t[:] > tlb) & (t[:] < tub)
-		NoPs[i+coarseN] = len(np.where(mask)[0])
-		if biexp:
-			if autolife == 0.:
-				sols[i+coarseN,:] = MultiLogLikelihoodFit(mask, t, y)[0]
-				fitmeasure[i+coarseN] = np.abs(
-										MultiLogLikelihood(sols[i+coarseN,:],
-											t[mask], y[mask]) / \
-												np.sqrt(NoPs[i+coarseN]))
-			else:
-				sols[i+coarseN,:] = MultiLogLikelihoodFitWithNoise(mask,
-															autolife, t, y)[0]
-				fitmeasure[i+coarseN] = np.abs(
-								MultiLogLikelihoodWithNoise(sols[i+coarseN,:],
-											autolife, t[mask], y[mask]) / \
-												np.sqrt(NoPs[i+coarseN]))
-		else:
-			sols[i+coarseN,:] = LogLikelihoodFit(mask, t, y)[0]
-			fitmeasure[i+coarseN] = np.abs(LogLikelihood(sols[i+coarseN,:],
-											t[mask], y[mask]) / \
-												np.sqrt(NoPs[i+coarseN]))
-	
-	iMax = np.argmax(fitmeasure)
-	sol = sols[iMax]
-	mask = (t[:] > tlb) & (t[:] < tubs[iMax])
-	if biexp:
-		if autolife == 0.:
-			err = MultiPoissonTauStdError(sol, t, y)
-		else:
-			err = MultiPoissonTauStdErrorWithNoise(sol, autolife, t, y)
+		fit_function = BE
+		initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value, 0.3]
 	else:
-		err = PoissonTauStdError(sol, t, y)
-	print(str(filepath))
-	print("Life time {0:.3f}ns".format(sol[-1]), end = '\t')
-	if biexp:
-		if autolife == 0.:
-			print("{0:.3f}".format(sol[1]), end='\t')
-		else:
-			print("{0:.3f}".format(autolife), end='\t')
-	print("{0:.3f}".format(sol[-1]))
-	
-	fig, ax = plt.subplots(1,3, figsize=(16,7))
-	ax[0].plot(t[:], y[:], 'o', label='Data')
-	ax[0].plot(t[mask], y[mask], 'x', label='Selected for fitting')
-	ax[0].plot([t[np.argmax(y)], t[np.argmax(y)]],
-				[np.min(y[:]), np.max(y[:])], '--k')
+		fit_function = ME
+		initial_guess = [1.0*peak_value, 3.0]
+	#
+	startpoint = peak_index
+	fit_params, endpoints, likelihoods = FindEndpoint(
+									time_points[peak_index:],
+									data_points[peak_index:],
+									fit_function, initial_guess,
+									startpoint = startpoint,
+									fit_type = fit_type)
+	best_fit = np.argmax(likelihoods)
+	endpoint = endpoints[best_fit]
+	best_params = fit_params[best_fit]
+	#
+	test_threshold = 0.01
+	test_set = np.unique(data_points[endpoint-16:endpoint])
+	test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
+	#
+	fig = plt.figure(figsize=(16,7))
+	gs = gridspec.GridSpec(1, 3, width_ratios=[0.8, 1.6, 1])
+	ax = list(map(plt.subplot, gs))
+	#
+	ax[0].plot(time_points, data_points, 'o', label='Data')
+	ax[0].plot( time_points[startpoint:endpoint],
+				data_points[startpoint:endpoint],
+				'x', label='Selected for fitting')
+	ax[0].plot([time_points[peak_index], time_points[peak_index]],
+				[np.amin(data_points), np.amax(data_points)], '--k')
 	ax[0].set_xlabel('Time (ns)')
 	ax[0].set_ylabel('Intensity (A.U.)')
-	#ax[0].set_xlim([0,20])
 	ax[0].legend()
-
-	ax[1].plot(t[mask], y[mask], '.', label='Data')
+	#
+	ax[1].plot( time_points[startpoint:endpoint],
+				data_points[startpoint:endpoint],
+				marker = '.',
+				linestyle = 'none',
+				color = 'tab:blue',
+				label = 'Data')
 	if biexp:
-		if autolife == 0.:
-			ax[1].plot(t[mask], sol[0] * np.exp(-t[mask]/sol[1]) + \
-								sol[2] * np.exp(-t[mask]/sol[3]), '-',
-							label = r'Fit Line ($\tau = ' + \
-									'{0:.3f}ns'.format(sol[3]) + r'$)')
-		else:
-			ax[1].plot(t[mask], sol[0] * np.exp(-t[mask]/autolife) + \
-								sol[1] * np.exp(-t[mask]/sol[2]), '-',
-							label = r'Fit Line ($\tau = ' + \
-									'{0:.3f}ns'.format(sol[2]) + r'$)')
+		ax[1].plot( time_points[startpoint:endpoint],
+				fit_function(time_points, *best_params)[startpoint:endpoint],
+					linestyle = 'solid',
+					color = 'tab:red',
+					label = 'Full Fit')
+		a = fit_function(time_points, *best_params)[endpoint] / \
+					np.exp(-time_points[endpoint]/best_params[1])
+		ax[1].plot(time_points[startpoint:endpoint],
+				a*np.exp(-time_points[startpoint:endpoint]/best_params[1]),
+				linestyle = 'dashed',
+				color = 'tab:orange',
+				label = r'Signal Fit ($\tau = ' + \
+						'{0:.3f}ns'.format(best_params[1]) + r'$)')
 	else:
-		ax[1].plot(t[mask], sol[0] * np.exp(-t[mask]/sol[1]), '-',
-						label = r'Fit Line ($\tau = ' + \
-								'{0:.3f}ns'.format(sol[1]) + r'$)')
-	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns +/- {1:.3f} ns".format(
-														sol[-1],err),
-				bbox=dict(facecolor='orange', alpha=0.5), fontsize=12,
+		ax[1].plot( time_points[startpoint:endpoint],
+				fit_function(time_points, *best_params)[startpoint:endpoint],
+					linestyle = 'solid',
+					color = 'tab:orange',
+					label = r'Fit ($\tau = ' + \
+						'{0:.3f}ns'.format(best_params[1]) + r'$)')
+	ax[1].set_yscale('log')
+	lowest_point = np.argmin(data_points[peak_index:endpoint])
+	ax[1].set_ylim([data_points[lowest_point]*0.8,
+					data_points[peak_index]*1.1])
+	ax[1].set_xlim([time_points[startpoint]-0.2,time_points[endpoint]+0.1])
+	ax[1].set_xlabel('Time (ns)')
+	ax[1].legend()
+#	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns +/- {1:.3f}".format(
+#										fit_params[best_fit,1],err),
+	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns".format(best_params[1]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
 				fontweight='bold', color='blue', transform=ax[1].transAxes)
+	if test:
+		ax[1].text(.4, .03, "Sparse Data!",
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='red', transform=ax[1].transAxes)
 	if biexp:
 		if autolife == 0.:
 			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
-														sol[1]),
-				bbox=dict(facecolor='orange', alpha=0.5), fontsize=12,
+														best_params[3]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
 				fontweight='bold', color='blue', transform=ax[1].transAxes)
 		else:
 			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
 														autolife),
-				bbox=dict(facecolor='orange', alpha=0.5), fontsize=12,
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
 				fontweight='bold', color='blue', transform=ax[1].transAxes)
-
-	ax[1].set_yscale('log')
-	ax[1].set_xlabel('Time (ns)')
-	ax[1].legend()
-
-	ax[2].plot(tubs, fitmeasure, '.')
-	ax[2].plot([tubs[iMax], tubs[iMax]],
-				[np.min(fitmeasure)+1, np.max(fitmeasure)],
+	#
+	ax[2].plot(time_points[endpoints], likelihoods, '.')
+	ax[2].plot([time_points[endpoint], time_points[endpoint]],
+				[np.amin(likelihoods), np.amax(likelihoods)],
 				'--k')
-	if showfits:
-		ax[2].plot(tubs, sols[:,-1], '.')
-	ax[2].text(tubs[iMax]*0.6, (np.min(fitmeasure)+np.max(fitmeasure))/2 - \
-			(np.max(fitmeasure)-np.min(fitmeasure))/2.2,
-			"Time upper limit = {0:.2f}ns\nNumber of points = {1:d}".format(
-														tubs[iMax], NoPs[iMax]))
+#	if showfits:
+#		ax[2].plot(time_points[endpoints], fit_params[:,1], '.')
+	ax[2].text(.04, .09, "Time upper limit = {0:.2f}ns".format(
+										time_points[endpoint]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[2].transAxes)
+	ax[2].text(.04, .03,"Number of data points = {0:d}".format(
+										endpoints[best_fit]-peak_index),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[2].transAxes)
 	ax[2].set_xlabel('Time Upper Bound (ns)')
 	ax[2].set_ylabel('Goodness of Fit')
+	#
 	fig.suptitle(filepath.name)
-	#plt.show()
-	fig.savefig(filepath.with_suffix('.pdf'))
+	fig.savefig(filepath.with_suffix('.tailfit.pdf'))
 	plt.close('all')
-	print(sol)
-	return np.array([sol[-1],err])
+	print('\t'.join(['{0:2.12f}'.format(param) for param in best_params]))
+	return best_params, test
+#	return np.array([best_params[1], err]) # TODO: impliment error
 
 ################################################################################
-# Convolution fitting option.
+# Slow Convolution Fit
 ################################################################################
 
-def ConvolutionFit(filepath, biexp, autolife, passed_mu, passed_sigma):
-	def ME(x,A,tau1,B,tau2):
-		return A*np.exp(-x/tau1)+B*np.exp(-x/tau2)
-	
-	def IRF(x,mu,sigma):
-		return np.exp(-(x-mu)**2/2/sigma**2)/sigma/np.sqrt(2*np.pi)
-	
-	def F(x,B,tau2,A,tau1,mu,sigma):
-		return integrate.quad(
-			lambda t,x: IRF(t,mu,sigma)*ME(x-t,A,tau1,B,tau2),
-				-1.,x,args=x)[0]
-	conv_function = np.vectorize(F)
-	
-	def G(x,B,tau2,A,mu,sigma):
-		return integrate.quad(
-			lambda t,x: IRF(t,mu,sigma)*ME(x-t,A,autolife,B,tau2),
-				-1.,x,args=x)[0]
-	conv_function2 = np.vectorize(G)
-	
-	def H(x,B,tau2,A):
-		return integrate.quad(
-			lambda t,x: IRF(t,passed_mu,passed_sigma)*ME(x-t,A,autolife,B,tau2),
-				-1.,x,args=x)[0]
-	conv_function3 = np.vectorize(H)
-	
-	def K(x,B,tau2, mu,sigma):
-		return integrate.quad(
-			lambda t,x: IRF(t,mu,sigma)*ME(x-t,0.,1.,B,tau2),
-				-1.,x,args=x)[0]
-	conv_function4 = np.vectorize(K)
-	
-	params = np.array([])
-	covar = np.array([])
-	
-	fixedfilepath = Path(str(filepath) + '.fixed')
-	with open(fixedfilepath, 'w') as fixedfile, open(filepath, 'r') as infile:
-		for linenumber, line in enumerate(infile):
-			try:
-				t = float(line.split(',')[0])
-				x = float(line.split(',')[1])
-				fixedfile.write('{0:f},{1:f}'.format(t, x) + os.linesep)
-			except ValueError:
-				print('Bad line ({0:d}) in {1:s}:'.format(linenumber,
-															filepath.name))
-				print('\t', line)
-	if fixedfilepath.stat().st_size == 0:
-		return np.array([-1,-1])
-	data = np.genfromtxt(fixedfilepath, delimiter=',')
-	
-	time_points = (data[:,0] - data[np.argmax(data[:,1]),0])/1000.
-	data_points = data[:,1]/np.amax(data[:,1])
-	mask = data_points[np.argmax(data_points):] < \
-				(np.amin(data_points[10:]) + \
-				(np.amax(data_points)-np.amin(data_points[10:])) * 0.03)
-	upper_bound = 0
-	if np.any(mask):
-		upper_bound = np.amin(np.where(mask))
-	else:
-		upper_bound = len(mask)
-	mask = data_points[10:np.argmax(data_points)] < \
-				(np.amin(data_points[10:]) + \
-				(np.amax(data_points)-np.amin(data_points[10:])) * 0.06)
-	lower_bound = 0
-	if np.any(mask):
-		lower_bound = np.amax(np.where(mask))
-	else:
-		lower_bound = 0
-	# mask = np.arange(np.argmax(data_points)-10, np.argmax(data_points)+340)
-	time_points = time_points[lower_bound:upper_bound]
-	data_points = data_points[lower_bound:upper_bound]
-	
+def ConvolutionFit(filepath,
+					biexp, autolife,
+					passed_mu, passed_sigma):
+	pass #TODO: this!
+
+################################################################################
+# Fast Convolution Fit
+################################################################################
+
+def FastConvolutionFit(filepath,
+						biexp, autolife,
+						passed_mu, passed_sigma,
+						fit_type = 'NLL'):
+	time_points, data_points = ExtractData(datafilepath)
+	time_points, data_points = CutData(time_points, data_points)
+	peak_index = np.argmax(data_points)
+	peak_value = data_points[peak_index]
+	IRF_centre_guess = time_points[peak_index]-0.12
+	IRF_width_guess = 0.08
 	if biexp:
 		if autolife == 0.:
-			params, covar = optimize.curve_fit(conv_function,
-											time_points, data_points,
-					p0=[.8,3.,.2,.3,time_points[np.argmax(data_points)],0.08])
-			
-		elif passed_mu == 0. or passed_sigma == 0.:
-			params, covar = optimize.curve_fit(conv_function2,
-											time_points, data_points,
-					p0=[.8,3.,.2,time_points[np.argmax(data_points)],0.08])
+			if passed_mu == 0. or passed_sigma == 0.:
+				fit_function = BEC
+				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value, 0.3,
+								IRF_centre_guess, IRF_width_guess]
+			else:
+				fit_function = lambda x, B, tau2, A, tau1: \
+								BEC(x, B, tau2, A, tau1,
+									passed_mu, passed_sigma)
+				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value,0.3]
 		else:
-			params, covar = optimize.curve_fit(conv_function3,
-											time_points, data_points,
-					p0=[.8,3.,.2])
+			if passed_mu == 0. or passed_sigma == 0.:
+				fit_function = lambda x, B, tau2, A, mu, sigma: \
+								BEC(x, B, tau2, A, autolife, mu, sigma)
+				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value,
+								IRF_centre_guess, IRF_width_guess]
+			else:
+				fit_function = lambda x, B, tau2, A: \
+								BEC(x, B, tau2, A, autolife,
+									passed_mu, passed_sigma)
+				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value]
 	else:
-		params, covar = optimize.curve_fit(conv_function4,
-										time_points, data_points,
-				p0=[1.,3.,time_points[np.argmax(data_points)],0.08])
-	print('\t'.join(['{0:2.6f}'.format(param) for param in params[:-2]]))
-	fig, ax = plt.subplots(1,1, figsize=(8,7))
-	ax.set_xlabel('Time (ns)')
-	ax.set_ylabel('Intensity (A.U.)')
-	ax.set_yscale('log')
-	ax.plot(time_points, data_points,'b.')
+		if passed_mu == 0. or passed_sigma == 0.:
+			fit_function = MEC
+			initial_guess = [1.0*peak_value, 3.0,
+								IRF_centre_guess, IRF_width_guess]
+		else:
+			fit_function = lambda x, A, tau: \
+							MEC(x, A, tau, passed_mu, passed_sigma)
+			initial_guess = [1.0*peak_value, 3.0]
+	#
+	startpoint = np.amax([0, np.argmax(data_points)-24])
+	fit_params, endpoints, likelihoods = FindEndpoint(
+									time_points, data_points,
+									fit_function, initial_guess,
+									startpoint = startpoint,
+									fit_type = fit_type)
+	best_fit = np.argmax(likelihoods)
+	endpoint = endpoints[best_fit]
+	best_params = fit_params[best_fit]
+	fit_points = fit_function(time_points, *best_params)
+	#
+	test_threshold = 0.01
+	test_set = np.unique(data_points[endpoint-16:endpoint])
+	test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
+	#
+	fig = plt.figure(figsize=(16,7))
+	gs = gridspec.GridSpec(1, 3, width_ratios=[0.8, 1.6, 1])
+	ax = list(map(plt.subplot, gs))
+	#
+	ax[0].plot(time_points, data_points, 'o', label='Data')
+	ax[0].plot( time_points[startpoint:endpoint],
+				data_points[startpoint:endpoint],
+				'x', label='Selected for fitting')
+	#ax[0].plot([time_points[peak_index], time_points[peak_index]],
+	#			[np.amin(data_points), np.amax(data_points)], '--k')
+	ax[0].set_xlabel('Time (ns)')
+	ax[0].set_ylabel('Intensity (A.U.)')
+	ax[0].legend()
+	#
+	ax[1].plot( time_points[startpoint:endpoint],
+				data_points[startpoint:endpoint],
+				marker = '.',
+				linestyle = 'none',
+				color = 'tab:blue',
+				label = 'Data')
+	if biexp:
+		ax[1].plot( time_points[startpoint:endpoint],
+					fit_points[startpoint:endpoint],
+						linestyle = 'solid',
+						color = 'tab:red',
+						label = 'Full Fit')
+		a = fit_points[endpoint] / \
+					np.exp(-time_points[endpoint]/best_params[1])
+		ax[1].plot(time_points[peak_index:endpoint],
+				a*np.exp(-time_points[peak_index:endpoint]/best_params[1]),
+				linestyle = 'dashed',
+				color = 'tab:orange',
+				label = r'Signal Fit ($\tau = ' + \
+						'{0:.3f}ns'.format(best_params[1]) + r'$)')
+	else:
+		ax[1].plot( time_points[peak_index:endpoint],
+					fit_points[peak_index:endpoint],
+					linestyle = 'solid',
+					color = 'tab:red',
+					label = r'Fit ($\tau = ' + \
+						'{0:.3f}ns'.format(best_params[1]) + r'$)')
+	ax[1].set_yscale('log')
+	ax[1].set_xlabel('Time (ns)')
+#	lowest_point = np.argmin(data_points[peak_index:endpoint])
+#	ax[1].set_ylim([data_points[lowest_point] * 0.8,
+	ax[1].set_ylim([fit_points[endpoint] * 0.8,
+					data_points[peak_index] * 1.1])
+	ax[1].set_xlim([time_points[startpoint] - 0.2,
+					time_points[endpoint] + 0.1])
+	ax[1].legend()
+#	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns +/- {1:.3f}".format(
+#										fit_params[best_fit,1],err),
+	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns".format(best_params[1]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[1].transAxes)
+	if test:
+		ax[1].text(.4, .03, "Sparse Data!",
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='red', transform=ax[1].transAxes)
 	if biexp:
 		if autolife == 0.:
-			ax.plot(time_points, conv_function(time_points,
-													*params),'r-')
-			split = 0
-			for index, point in enumerate(time_points):
-				if point > 0 and \
-					ME(point, 0, params[1], params[2], params[3]) / \
-						params[0] < 0.2:
-					split = index
-					break
-			a = conv_function(time_points[-1],*params) / \
-					np.exp(-time_points[-1]/params[1])
-			ax.plot(time_points[split:],
-					a*np.exp(-time_points[split:]/params[1]),'c--')
-			ax.text(.1, .09, "Autofluorescence: {0:.3f} ns".format(params[3]),
-				bbox=dict(facecolor='orange', alpha=0.5), fontsize=12,
-				fontweight='bold', color='blue', transform=ax.transAxes)
-		
-		elif passed_mu == 0. or passed_sigma ==0.:
-			ax.plot(time_points, conv_function2(time_points, *params),'r-')
+			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
+														best_params[3]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[1].transAxes)
 		else:
-			ax.plot(time_points, conv_function3(time_points, *params),'r-')
-	else:
-		ax.plot(time_points, conv_function4(time_points,
-												*params),'r-')
-	ax.text(.1, .03, "Lifetime: {0:.3f} +/- {1:.3f} ns".format(
-										params[1], np.sqrt(covar[1,1])),
-				bbox=dict(facecolor='orange', alpha=0.5), fontsize=12,
-				fontweight='bold', color='blue', transform=ax.transAxes)
-	ax.set_ylim([0.15,1.1])
-#	ax.legend()
+			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
+														autolife),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[1].transAxes)
+	#
+	ax[2].plot(time_points[endpoints], likelihoods, '.')
+	ax[2].plot([time_points[endpoint], time_points[endpoint]],
+				[np.amin(likelihoods), np.amax(likelihoods)],
+				'--k')
+#	if showfits:
+#		ax[2].plot(time_points[endpoints], fit_params[:,1], '.')
+	ax[2].text(.04, .09, "Time upper limit = {0:.2f}ns".format(
+										time_points[endpoint]),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[2].transAxes)
+	ax[2].text(.04, .03,"Number of data points = {0:d}".format(
+										endpoints[best_fit]-peak_index),
+				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+				fontweight='bold', color='blue', transform=ax[2].transAxes)
+	ax[2].set_xlabel('Time Upper Bound (ns)')
+	ax[2].set_ylabel('Fit Measure')
+	#
 	fig.suptitle(filepath.name)
-	if biexp:
-		fig.savefig(filepath.with_suffix('.biexp.convo.pdf'))
-	else:
-		fig.savefig(filepath.with_suffix('.monoexp.convo.pdf'))
+	fig.savefig(filepath.with_suffix('.convofit.pdf'))
 	plt.close('all')
-	return np.array([params[1],np.sqrt(covar[1,1])])
+	print('\t'.join(['{0:2.12f}'.format(param) for param in best_params]))
+	return best_params, test
+#	return np.array([best_params[1], err]) # TODO: impliment error
 
 ################################################################################
 # Main function uses argparse to take files and directories and process files.
@@ -405,14 +502,23 @@ if __name__ == "__main__":
 	#  or log-likelyhood for Poisson distributed data, and to set a flag for
 	#  whether to show the fit lifetimes with the likelyhood plot.
 	parser = argparse.ArgumentParser(description='Fit decay data from FLIMfit.')
-	parser.add_argument('-s', '--show', dest='showfits',
-						action='store_const',
-						const=True, default=False,
-						help='Show fit lifetimes for worse fits.')
-	parser.add_argument('-b', '--bi', dest='biexp',
+	parser.add_argument('-b', '--biex', dest='biexponential',
 						action='store_const',
 						const=True, default=False,
 						help='Use a biexponential function.')
+	parser.add_argument('-c', '--conv', dest='convolution',
+						action='store_const',
+						const=True, default=False,
+						help = 'Do a convolution fit rather than tail fit.')
+	parser.add_argument('-f', '--fcon', dest='fast_conv',
+						action='store_const',
+						const=True, default=False,
+						help = 'Do a fast convolution fit. ' + \
+				'(This requires uniformly temporally spaced data points.)')
+	parser.add_argument('-x', '--xsqr', dest='fit_type',
+						action='store_const',
+						const='CHI', default='NLL',
+						help = 'Use Chi Square rather than Poisson.')
 	parser.add_argument('-a', '--auto', dest='autolife',
 						nargs = 1,
 						default = [0.],
@@ -424,11 +530,8 @@ if __name__ == "__main__":
 						default = [0., 0.],
 						type = float,
 						required = False,
-						help = 'IRF mean and std. For convolution fitting.')
-	parser.add_argument('-c', '--conv', dest='convolution',
-						action='store_const',
-						const=True, default=False,
-						help = 'Do a full convolution fit rather than tail.')
+						help = 'IRF mean and std. For convolution fitting. '+\
+								'In tail fit mode use Weiner deconvolution.')
 	parser.add_argument('-o', '--output',dest='outputfile',
 						nargs = 1,
 						default = [Path.cwd() / \
@@ -437,57 +540,58 @@ if __name__ == "__main__":
 						type = str,
 						required = False,
 						help = 'Filename to put output csv data in.')
-	parser.add_argument('data', type=str, nargs='*', default='./',
+	parser.add_argument('data', type=str, nargs='*', default=['./'],
 						help='Path to csv data file(s) to process.')
-
-	args = parser.parse_args()
-	datapaths = list(map(Path,args.data))
-	outfile = open(args.outputfile[0],'w')
+	#
+	parse_args = parser.parse_args()
+	datapaths = list(map(Path, parse_args.data))
+	outfilename = parse_args.outputfile[0]
+	outfile = open(outfilename,'w')
+	args = [parse_args.biexponential,
+			parse_args.autolife[0],
+			parse_args.response[0],
+			parse_args.response[1],
+			parse_args.fit_type]
+	summary_data = np.zeros((0,2))
 	for datapath in datapaths:
 		if datapath.exists():
 			if datapath.is_dir():
-				for datafilepath in datapath.glob('*.csv'): # rglob recurses
-					if datafilepath.suffix == '.csv':
-						fit = np.array([0,0])
-						if args.convolution:
-							fit = ConvolutionFit(datafilepath,
-													args.autolife[0],
-													args.response[0],
-													args.response[1])
-						else:
-							fit = ProcessFile(datafilepath, args.showfits,
-														args.biexp,
-														args.autolife[0])
-						outfile.write('\t'.join([str(datafilepath),
-										'Life time: {0:.3f}ns'.format(fit[0]),
-										'+/- {0:.3f}ns'.format(fit[1]),
-										'{0:.8f}'.format(fit[0])
-										]) + os.linesep)
+				datafilepaths = datapath.glob('*.csv') # use rglob to recurse
 			else:
-				if datapath.suffix == '.csv':
-					fit = np.array([0,0])
-					if args.convolution:
-						fit = ConvolutionFit(datapath,
-												args.biexp,
-												args.autolife[0],
-												args.response[0],
-												args.response[1])
-					else:
-						fit = ProcessFile(datapath, args.showfits,
-												args.biexp,
-												args.autolife[0])
-					outfile.write('\t'.join([str(datapath),
-									'Life time: {0:.3f}ns'.format(fit[0]),
-									'+/- {0:.3f}ns'.format(fit[1]),
-									'{0:.8f}'.format(fit[0])
-									]) + os.linesep)
-				else:
-					print('File {0:s} is not a csv file.'.format(str(datapath)))
+				datafilepaths = [datapath]
 		else:
 			print('Path {0:s} does not seem to exist.'.format(str(datapath)))
+			continue
+		# if it is a file or directory of files we proceed to extracting data.
+		for datafilepath in datafilepaths:
+			if datafilepath.suffix != '.csv':
+				print('File {0:s} is not a csv file.'.format(
+														str(datafilepath)))
+				continue
+			# if there are parsable csv data files we proceed to fitting.
+			fit = np.array([0,0])
+			if parse_args.fast_conv:
+				fit, sparse_test = FastConvolutionFit(datafilepath, *args)
+			elif parse_args.convolution:
+			#	fit = ConvolutionFit(datafilepath, *args) #TODO: impliment
+				fit, sparse_test = FastConvolutionFit(datafilepath, *args)
+			else:
+				fit, sparse_test = TailFit(datafilepath, *args)
+			outfile.write('\t'.join([str(datafilepath),
+			#				'Life time: {0:.3f}ns'.format(fit[0]),
+			# TODO				'+/- {0:.3f}ns'.format(fit[1]),
+							'{0:.8f}'.format(fit[1]),
+							'sparse' if sparse_test else 'good'
+							]) + os.linesep)
+			try:
+				summary_data = np.append(summary_data,
+					[[int(datafilepath.stem.split('_')[-1]), fit[1]]],
+						axis = 0)
+			except:
+				pass
 	outfile.close()
-
-
-
+	summary_data = summary_data[summary_data[:,0].argsort()]
+	np.savetxt(Path(outfilename).with_suffix('.summary.txt'),
+					summary_data, delimiter='\t', fmt = '%d\t%1.9f')
 
 

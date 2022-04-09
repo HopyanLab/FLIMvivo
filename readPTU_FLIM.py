@@ -30,12 +30,14 @@ Aim : Open and convert Picoquant .ptu image files for FLIM analysis
 
 --------------------------------------------------------------------------------
 
-This file was modified from the original and included in Hopyan Lab's FLIMvivo
- project. The original license is reproduced below. The relevant changes are
- a slightly different set of options for NUMBA which improved performance
- reading PTU files on our Linux system. It seems to diminish performance on a
- Windows system we tested on. If using on Windows you may want to use the
- original, available at <https://github.com/SumeetRohilla/readPTU_FLIM>
+ This file was modified from the original, available at:
+    <https://github.com/SumeetRohilla/readPTU_FLIM>
+ and included in Hopyan Lab's FLIMvivo project. The original license is
+ reproduced below. The relevant changes are a slightly different set of
+ options for NUMBA which improved performance reading PTU files and some
+ minor code improvements and cleanup. Also, reversed X and Y to correspond
+ correctly to the comment below and removed intensity image since it can
+ just be generated from the flim_data_stack by the user if necessary.
 
 --------------------------------------------------------------------------------
 
@@ -66,21 +68,14 @@ SOFTWARE.
 import time
 import sys
 import struct
-import io
 import numpy as np
-from collections import OrderedDict, namedtuple
-from sys import getsizeof
-import gc
-import matplotlib.pyplot as plt
 from numba import jit
-from numba import jitclass
-from numba.types import uint16
-from numba.types import Tuple
 
 class PTUreader():
 	
 	"""
-	PTUreader() provides the capability to retrieve raw_data or image_data from a PTU file acquired using available PQ TCSPC module in the year 2019
+	PTUreader() provides the capability to retrieve raw_data or image_data from
+	 a PTU file acquired using available PQ TCSPC module in the year 2019
 	
 	Input arguements:
 	
@@ -89,17 +84,22 @@ class PTUreader():
 	
 	Output
 	
-	ptu_read_raw_data	 = This function reads single-photon data from the file 'name'
+	ptu_read_raw_data = This function reads single-photon data from file 'name'
 							The output variables contain the followig data:
-							sync	   : number of the sync events that preceeded this detection event
+							sync	   : number of the sync events that
+											 preceeded this detection event
 							tcspc	  : number of the tcspc-bin of the event
-							channel	: number of the input channel of the event (detector-number)
-							special	: marker event-type (0: photon; else : virtual photon/line_Startmarker/line_Stopmarker/framer_marker)
+							channel	: number of the input channel of the event
+										(detector-number)
+							special	: marker event-type (0: photon; else :
+										virtual photon/line_Startmarker/
+											line_Stopmarker/framer_marker)
 							
-	For example: Please see Jupyter notebook for additional info on how to get raw TTTR data
+	For example: Please see Jupyter notebook for additional info on how to get
+					raw TTTR data
 					
 	get_flim_data_stack	= This function builds a FLIM image from raw tttr_data
-							 Outputs: flim_data_stack  = [numPixX numPixY numDetectors numTCSPCbins]
+		 Outputs: flim_data_stack = [numPixX numPixY numDetectors numTCSPCbins]
 	
 	"""
 	
@@ -122,18 +122,36 @@ class PTUreader():
 	
 	# Dictionary with Record Types format for different TCSPC devices and corresponding T2 or T3 TTTR mode
 	rec_type = dict(
-		rtPicoHarpT3	 = 0x00010303,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $03 (PicoHarp)
-		rtPicoHarpT2	 = 0x00010203,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $03 (PicoHarp)
-		rtHydraHarpT3	= 0x00010304,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $04 (HydraHarp)
-		rtHydraHarpT2	= 0x00010204,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $04 (HydraHarp)
-		rtHydraHarp2T3   = 0x01010304,  # (SubID = $01 ,RecFmt: $01) (V2), T-Mode: $03 (T3), HW: $04 (HydraHarp)
-		rtHydraHarp2T2   = 0x01010204,  # (SubID = $01 ,RecFmt: $01) (V2), T-Mode: $02 (T2), HW: $04 (HydraHarp)
-		rtTimeHarp260NT3 = 0x00010305,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $05 (TimeHarp260N)
-		rtTimeHarp260NT2 = 0x00010205,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $05 (TimeHarp260N)
-		rtTimeHarp260PT3 = 0x00010306,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $06 (TimeHarp260P)
-		rtTimeHarp260PT2 = 0x00010206,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $06 (TimeHarp260P)
-		rtMultiHarpNT3   = 0x00010307,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $07 (MultiHarp150N)
-		rtMultiHarpNT2   = 0x00010207,  # (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $07 (MultiHarp150N)
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $03 (PicoHarp)
+		rtPicoHarpT3	 = 0x00010303,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $03 (PicoHarp)
+		rtPicoHarpT2	 = 0x00010203,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $04 (HydraHarp)
+		rtHydraHarpT3	= 0x00010304,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $04 (HydraHarp)
+		rtHydraHarpT2	= 0x00010204,
+		# (SubID = $01 ,RecFmt: $01) (V2), T-Mode: $03 (T3), HW: $04 (HydraHarp)
+		rtHydraHarp2T3   = 0x01010304,
+		# (SubID = $01 ,RecFmt: $01) (V2), T-Mode: $02 (T2), HW: $04 (HydraHarp)
+		rtHydraHarp2T2   = 0x01010204,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $05
+		#  (TimeHarp260N)
+		rtTimeHarp260NT3 = 0x00010305,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $05
+		#  (TimeHarp260N)
+		rtTimeHarp260NT2 = 0x00010205,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $06
+		#  (TimeHarp260P)
+		rtTimeHarp260PT3 = 0x00010306,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $06
+		#  (TimeHarp260P)
+		rtTimeHarp260PT2 = 0x00010206,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $03 (T3), HW: $07
+		#  (MultiHarp150N)
+		rtMultiHarpNT3   = 0x00010307,
+		# (SubID = $00 ,RecFmt: $01) (V1), T-Mode: $02 (T2), HW: $07
+		#  (MultiHarp150N)
+		rtMultiHarpNT2   = 0x00010207,
 	)
 
 	def __init__(self, filename, print_header_data = False):
@@ -142,7 +160,7 @@ class PTUreader():
 		# if get_image_data = True then get_raw_data = False
 		# else get_raw_data = True and get_image_data = False
 		# Usually a user will only demand for raw or image data
-				
+		
 		#Reverse mappins of tag-type and record-type dictionary
 		self.tag_type_r = {j: k for k, j in self.tag_type.items()}
 		self.rec_type_r = {j: k for k, j in self.rec_type.items()}
@@ -151,7 +169,8 @@ class PTUreader():
 		self.print_header	= print_header_data
 		
 		f = open(self.ptu_name, 'rb')
-		self.ptu_data_string = f.read() # ptu_data_string is a string of bytes and reads all file in memory
+		self.ptu_data_string = f.read() # ptu_data_string is a string of bytes
+										# read file in memory
 		f.close()
 
 		
@@ -190,7 +209,8 @@ class PTUreader():
 		# Get the header struct as a tuple
 		# Struct fields: 32-char string, int32, uint32, int64
 
-		tag_struct = struct.unpack('32s i I q', ptu_data_string[offset:offset+48])
+		tag_struct = struct.unpack('32s i I q',
+										ptu_data_string[offset:offset+48])
 		offset += 48
 
 		# Get the tag name (first element of the tag_struct)
@@ -218,16 +238,20 @@ class PTUreader():
 		# Some tag types have additional data
 		if tag['type'] == 'tyAnsiString':
 			try:
-				tag['data'] = ptu_data_string[offset: offset + tag['value']].rstrip(b'\0').decode('utf-8')
+				tag['data'] = ptu_data_string[offset: offset + \
+								tag['value']].rstrip(b'\0').decode('utf-8')
 			except:
-				tag['data'] = ptu_data_string[offset: offset + tag['value']].rstrip(b'\0').decode('iso-8859-1')
+				tag['data'] = ptu_data_string[offset: offset + \
+							tag['value']].rstrip(b'\0').decode('iso-8859-1')
 			offset += tag['value']
 		elif tag['type'] == 'tyFloat8Array':
-			tag['data'] = np.frombuffer(ptu_data_string, dtype='float', count=tag['value']/8)
+			tag['data'] = np.frombuffer(ptu_data_string, dtype='float',
+										count=tag['value']/8)
 			offset += tag['value']
 		elif tag['type'] == 'tyWideString':
 			# WideString default encoding is UTF-16.
-			tag['data'] = ptu_data_string[offset: offset + tag['value']*2].decode('utf16')
+			tag['data'] = ptu_data_string[offset: offset + \
+							tag['value']*2].decode('utf16')
 			offset += tag['value']
 		elif tag['type'] == 'tyBinaryBlob':
 			tag['data'] = ptu_data_string[offset: offset + tag['value']]
@@ -244,12 +268,14 @@ class PTUreader():
 		FileTagEnd = 'Header_End' 
 		tag_end_offset = ptu_data_string.find(FileTagEnd.encode())
 
-		tagName, tagValue, offset  = self._ptu_read_tags(ptu_data_string, offset)
+		tagName, tagValue, offset  = self._ptu_read_tags(ptu_data_string,
+																offset)
 		self.head[tagName] = tagValue
 
 		#while offset < tag_end_offset:
 		while tagName != FileTagEnd:
-				tagName, tagValue, offset = self._ptu_read_tags(ptu_data_string, offset)
+				tagName, tagValue, offset = self._ptu_read_tags(ptu_data_string,
+																	offset)
 				self.head[tagName] = tagValue
 
 		# End of Header file and beginning of TTTR data
@@ -271,10 +297,10 @@ class PTUreader():
 
 		Returns:
 		sync	: number of the sync events that preceeded this detection event
-		tcspc   : number of the tcspc-bin of the event
+		tcspc	: number of the tcspc-bin of the event
 		chan	: number of the input channel of the event (detector-number)
-		special : indicator of the event-type (0: photon; else : virtual photon)
-		num	 : counter of the records that were actually read
+		special	: indicator of the event-type (0: photon; else : virtual photon)
+		num		: counter of the records that were actually read
 
 
 		'''
@@ -284,7 +310,9 @@ class PTUreader():
 		num_T3records = self.head['TTResult_NumberOfRecords']
 
 		#Read all T3 records in memory
-		t3records = np.frombuffer(self.ptu_data_string, dtype='uint32', count=num_T3records, offset= self.head['Header_End'])
+		t3records = np.frombuffer(self.ptu_data_string, dtype='uint32',
+									count=num_T3records,
+									offset= self.head['Header_End'])
 
 		# Clear ptu string data from memory and delete it's existence
 		del self.ptu_data_string
@@ -307,12 +335,18 @@ class PTUreader():
 			#   |x|x|x|x| | | | | | | | | | | | |  | | | | | | | | | | | | | | | | |  --> Spectral/TCSPC input Channel
 			#   +-------------------------------+  +-------------------------------+
 
-			WRAPAROUND = 65536												   # After this sync counter will overflow
-			sync	   = np.bitwise_and(t3records, 65535)						# Lowest 16 bits
-			tcspc	  = np.bitwise_and(np.right_shift(t3records, 16), 4095)	 # Next 12 bits, dtime can be obtained from header
-			chan	   = np.bitwise_and(np.right_shift(t3records, 28),15)		# Next 4 bits 
-			special	= ((chan==15)*1)*(np.bitwise_and(tcspc,15))			   # Last bit for special markers
-			index	  = ((chan==15)*1)*((np.bitwise_and(tcspc,15)==0)*1)		# Find overflow locations
+			# After this sync counter will overflow
+			WRAPAROUND = 65536
+			# Lowest 16 bits
+			sync	   = np.bitwise_and(t3records, 65535)
+			# Next 12 bits, dtime can be obtained from header
+			tcspc	  = np.bitwise_and(np.right_shift(t3records, 16), 4095)
+			# Next 4 bits
+			chan	   = np.bitwise_and(np.right_shift(t3records, 28),15)
+			# Last bit for special markers
+			special	= ((chan==15)*1)*(np.bitwise_and(tcspc,15))
+			# Find overflow locations
+			index	  = ((chan==15)*1)*((np.bitwise_and(tcspc,15)==0)*1)
 			chan[chan==15]  = special[chan==15]
 			chan[chan==1] = 0
 			chan[chan==2] = 1
@@ -339,7 +373,11 @@ class PTUreader():
 			special	= ((chan==15)*1)*np.bitwise_and(tcspc,15)				 # Last bit for special markers
 			index	  = ((chan==15)*1)*((np.bitwise_and(tcspc,15)==0)*1)		# Find overflow locations
 
-		elif record_type in ['rtHydraHarpT3', 'rtHydraHarp2T3', 'rtTimeHarp260NT3', 'rtTimeHarp260PT3','rtMultiHarpNT3']:
+		elif record_type in ['rtHydraHarpT3',
+							 'rtHydraHarp2T3',
+							 'rtTimeHarp260NT3',
+							 'rtTimeHarp260PT3',
+							 'rtMultiHarpNT3']:
 
 			print('TCSPC Hardware: {}'.format(record_type[2:]))
 
@@ -358,12 +396,18 @@ class PTUreader():
 			#   +-------------------------------+  +-------------------------------+
 			#   |x| | | | | | | | | | | | | | | |  | | | | | | | | | | | | | | | | |  --> Special markers
 			#   +-------------------------------+  +-------------------------------+
-			WRAPAROUND = 1024												   # After this sync counter will overflow
-			sync	   = np.bitwise_and(t3records, 1023)						# Lowest 10 bits
-			tcspc	  = np.bitwise_and(np.right_shift(t3records, 10), 32767)   # Next 15 bits, dtime can be obtained from header
-			chan	   = np.bitwise_and(np.right_shift(t3records, 25),63)	   # Next 8 bits 
-			special	= np.bitwise_and(t3records,2147483648)>0				 # Last bit for special markers
-			index	  = (special*1)*((chan==63)*1)						   # Find overflow locations
+			# After this sync counter will overflow
+			WRAPAROUND = 1024
+			# Lowest 10 bits
+			sync	   = np.bitwise_and(t3records, 1023)
+			# Next 15 bits, dtime can be obtained from header
+			tcspc	  = np.bitwise_and(np.right_shift(t3records, 10), 32767)
+			# Next 8 bits 
+			chan	   = np.bitwise_and(np.right_shift(t3records, 25),63)
+			# Last bit for special markers
+			special	= np.bitwise_and(t3records,2147483648)>0
+			# Find overflow locations
+			index	  = (special*1)*((chan==63)*1)
 			special	= (special*1)*chan
 
 		elif record_type == 'rtHydraHarpT2':
@@ -382,15 +426,23 @@ class PTUreader():
 			#   +-------------------------------+  +-------------------------------+
 			#   |x| | | | | | | | | | | | | | | |  | | | | | | | | | | | | | | | | |  --> Special markers
 			#   +-------------------------------+  +-------------------------------+
-			WRAPAROUND = 33552000											   # After this sync counter will overflow
-			sync	   = np.bitwise_and(t3records, 33554431)					# Lowest 25 bits
-			chan	   = np.bitwise_and(np.right_shift(t3records, 25),63)	   # Next 6 bits 
-			tcspc	  = np.bitwise_and(chan, 15)							   
-			special	= np.bitwise_and(np.right_shift(t3records, 31),1)		# Last bit for special markers
-			index	  = (special*1) * ((chan==63)*1)							 # Find overflow locations
+			# After this sync counter will overflow
+			WRAPAROUND = 33552000
+			# Lowest 25 bits
+			sync	   = np.bitwise_and(t3records, 33554431)
+			# Next 6 bits 
+			chan	   = np.bitwise_and(np.right_shift(t3records, 25),63)
+			tcspc	  = np.bitwise_and(chan, 15)
+			# Last bit for special markers
+			special	= np.bitwise_and(np.right_shift(t3records, 31),1)
+			 # Find overflow locations
+			index	  = (special*1) * ((chan==63)*1)
 			special	= (special*1)*chan
 
-		elif record_type in ['rtHydraHarp2T2', 'rtTimeHarp260NT2', 'rtTimeHarp260PT2','rtMultiHarpNT2']:
+		elif record_type in ['rtHydraHarp2T2',
+							 'rtTimeHarp260NT2',
+							 'rtTimeHarp260PT2',
+							 'rtMultiHarpNT2']:
 
 			print('TCSPC Hardware: {}'.format(record_type[2:]))
 
@@ -407,26 +459,33 @@ class PTUreader():
 			#   |x| | | | | | | | | | | | | | | |  | | | | | | | | | | | | | | | | |  --> Special markers
 			#   +-------------------------------+  +-------------------------------+
 
-			WRAPAROUND = 33554432											   # After this sync counter will overflow
-			sync	 = np.bitwise_and(t3records, 33554431)					# Lowest 25 bits
-			chan	 = np.bitwise_and(np.right_shift(t3records, 25),63)	   # Next 6 bits 
+			# After this sync counter will overflow
+			WRAPAROUND = 33554432
+			# Lowest 25 bits
+			sync	 = np.bitwise_and(t3records, 33554431)
+			# Next 6 bits
+			chan	 = np.bitwise_and(np.right_shift(t3records, 25),63)
 			tcspc	 = np.bitwise_and(chan, 15)
-			special	= np.bitwise_and(np.right_shift(t3records, 31),1)		# Last bit for special markers
-			index	  = (special*1) * ((chan==63)*1)							# Find overflow locations
+			# Last bit for special markers
+			special	= np.bitwise_and(np.right_shift(t3records, 31),1)
+			# Find overflow locations
+			index	  = (special*1) * ((chan==63)*1)
 			special	= (special*1)*chan
 
 		else:
 			print('Illegal RecordType!')
 			exit(0)
 
-
-
 		# Fill in the correct sync values for overflow location	
-		#sync[np.where(index == 1)] = 1 # assert values of sync = 1 just right after overflow to avoid any overflow-correction instability in next step
+		#sync[np.where(index == 1)] = 1
+		# assert values of sync = 1 just right after overflow
+		#  to avoid any overflow-correction instability in next step
 		if record_type in ['rtHydraHarp2T3','rtTimeHarp260PT3']:
-			sync	= sync + (WRAPAROUND*np.cumsum(index*sync)) # For HydraHarp V1 and TimeHarp260 V1 overflow corrections 
+			# For HydraHarp V1 and TimeHarp260 V1 overflow corrections 
+			sync	= sync + (WRAPAROUND*np.cumsum(index*sync))
 		else:
-			sync	= sync + (WRAPAROUND*np.cumsum(index)) # correction for overflow to sync varibale
+			# correction for overflow to sync varibale
+			sync	= sync + (WRAPAROUND*np.cumsum(index))
 
 		sync		 = np.delete(sync, np.where(index == 1), axis = 0)
 		tcspc		 = np.delete(tcspc, np.where(index == 1), axis = 0)
@@ -447,7 +506,8 @@ class PTUreader():
 	
 	def get_flim_data_stack(self): 
 		
-		# some files may not contain Frame header, this is to keep consistency across differen acquisition modes
+		# some files may not contain Frame header,
+		#  this is to keep consistency across differen acquisition modes
 		if 'ImgHdr_Frame' not in self.head.keys():
 			self.head["ImgHdr_Frame"] = 4
 			
@@ -455,28 +515,42 @@ class PTUreader():
 		if self.head["Measurement_SubMode"] == 0:
 			raise IOError("This is not a FLIM PTU file.!!!")
 			sys.exit()
-		elif (self.head["ImgHdr_Ident"] == 1) or (self.head["ImgHdr_Ident"] == 5):
+		elif (self.head["ImgHdr_Ident"] == 1) or \
+				(self.head["ImgHdr_Ident"] == 5):
 			raise IOError("Piezo Scanner Data Reader Not Implemented Yet!!!")
 			sys.exit()
 		else:
-			# Create numpy array of important variables to be passed into numba accelaratd get_flim_data_stack_static function
-			# as numba doesn't recognizes python dict type files
+			# Create numpy array of important variables to be passed into numba
+			#  accelaratd get_flim_data_stack_static function
+			#  as numba doesn't recognizes python dict type files
 
-			header_variables  = np.array([self.head["ImgHdr_Ident"], self.head["MeasDesc_Resolution"],self.head["MeasDesc_GlobalResolution"],self.head["ImgHdr_PixX"], self.head["ImgHdr_PixY"], self.head["ImgHdr_LineStart"],self.head["ImgHdr_LineStop"], self.head["ImgHdr_Frame"]],dtype = np.uint64)
+			header_variables  = np.array([
+									self.head["ImgHdr_Ident"],
+									self.head["MeasDesc_Resolution"],
+									self.head["MeasDesc_GlobalResolution"],
+									self.head["ImgHdr_PixX"],
+									self.head["ImgHdr_PixY"],
+									self.head["ImgHdr_LineStart"],
+									self.head["ImgHdr_LineStop"],
+									self.head["ImgHdr_Frame"]
+										],
+										dtype = np.uint64)
 		
-		sync		 = self.sync 
+		sync		 = self.sync
 		tcspc		 = self.tcspc
-		channel		 = self.channel 
-		special		 = self.special 
+		channel		 = self.channel
+		special		 = self.special
 		
 		del self.sync, self.tcspc, self.channel , self.special
 		
-		return self.get_flim_data_stack_static(sync, tcspc, channel, special, header_variables)
+		flim_data_stack = self.get_flim_data_stack_static(sync, tcspc, channel,
+													special, header_variables)
+	#	intensity_image = np.sum(flim_data_stack, axis=(2,3))
+		return flim_data_stack#, intensity_image
 	
 	@staticmethod
-#	@jit('Tuple((uint8[:,:,:,:], uint64[:,:]))(uint64[:], uint64[:], uint16[:], uint16[:], uint16[:])',
-#			nopython=True)
-	@jit(nopython=True)
+	@jit('uint8[:,:,:,:](uint64[:], uint16[:], uint8[:], uint8[:], uint64[:])',
+			nopython=True)
 	def get_flim_data_stack_static(sync, tcspc,
 									channel, special,
 									header_variables):
@@ -492,38 +566,46 @@ class PTUreader():
 		
 		if (ImgHdr_Ident == 9) or (ImgHdr_Ident == 3):
 
-			tcspc_bin_resolution = 1e9*MeasDesc_Resolution		  # in Nanoseconds
-			sync_rate			= np.ceil(MeasDesc_GlobalResolution*1e9)  # in Nanoseconds
+			tcspc_bin_resolution = 1e9*MeasDesc_Resolution
+				# in Nanoseconds
+			sync_rate			 = np.ceil(MeasDesc_GlobalResolution*1e9)
+				# in Nanoseconds
 			
 #			num_of_detectors	 = np.max(channel)+1
-#			num_tcspc_channel	= np.max(tcspc)+1
-#			num_tcspc_channel	= floor(sync_rate/tcspc_bin_resolution)+1
+#			num_tcspc_channel	 = np.max(tcspc)+1
+#			num_tcspc_channel	 = floor(sync_rate/tcspc_bin_resolution)+1
 
 			num_of_detectors	 = np.unique(channel).size
-			num_tcspc_channel	= np.unique(tcspc).size
-			num_pixel_X		  = ImgHdr_PixX
-			num_pixel_Y		  = ImgHdr_PixY
+			num_tcspc_channel	 = np.unique(tcspc).size
+			num_pixel_X			 = ImgHdr_PixX
+			num_pixel_Y			 = ImgHdr_PixY
 			
 
-			flim_data_stack	  = np.zeros((num_pixel_Y, num_pixel_X,
-											 num_of_detectors,
-											 num_tcspc_channel),
-										   dtype  = np.uint8)
+			flim_data_stack		 = np.zeros((num_pixel_X, num_pixel_Y,
+											num_of_detectors,
+											num_tcspc_channel),
+												dtype  = np.uint8)
 
 			# Markers necessary to make FLIM image stack
-			LineStartMarker = 2**(ImgHdr_LineStart-1)
-			LineStopMarker  = 2**(ImgHdr_LineStop-1)
-			FrameMarker	 = 2**(ImgHdr_Frame-1)
+			LineStartMarker		 = 2**(ImgHdr_LineStart-1)
+			LineStopMarker		 = 2**(ImgHdr_LineStop-1)
+			FrameMarker			 = 2**(ImgHdr_Frame-1)
 
 			# Get Number of Frames
 			FrameSyncVal	= sync[np.where(special == FrameMarker)]
 			num_of_Frames   = FrameSyncVal.size
-			read_data_range = np.where(sync == FrameSyncVal[num_of_Frames-1])[0][0]
-
-			L1  = sync[np.where(special == LineStartMarker)] # Get Line start marker sync values
-			L2  = sync[np.where(special == LineStopMarker)]  # Get Line start marker sync values
-			
-			syncPulsesPerLine = np.floor(np.mean(L2[10:] - L1[10:])) 
+			read_data_range = np.where(sync == FrameSyncVal[
+													num_of_Frames-1])[0][0]
+			# Get Line start marker sync values
+			L1  = sync[np.where(special == LineStartMarker)]
+			# Get Line start marker sync values
+			L2  = sync[np.where(special == LineStopMarker)]
+			if len(L1) != len(L2):
+				shorter = min(len(L1), len(L2))
+				syncPulsesPerLine = np.floor(np.mean(L2[10:shorter] - \
+													 L1[10:shorter]))
+			else:
+				syncPulsesPerLine = np.floor(np.mean(L2[10:] - L1[10:]))
 
 #			 Get pixel dwell time values from header for PicoQuant_FLIMBee or Zeiss_LSM scanner
 
@@ -556,7 +638,8 @@ class PTUreader():
 				currentSync	= sync[event]
 				special_event  = special[event]
 
-				# is the record a valid photon event or a special marker type event
+				# is the record a valid photon event or 
+				#  a special marker type event
 				if special[event] == 0:
 					isPhoton = True
 				else:
@@ -584,16 +667,21 @@ class PTUreader():
 							insideFrame  = False
 							currentLine  = 0
 
-				# Build FLIM image data stack here for N-spectral/tcspc-input channels
+				# Build FLIM image data stack here for 
+				#  N-spectral/tcspc-input channels
 
 				if (isPhoton and insideLine and insideFrame):
 
-					currentPixel = int(np.floor((((currentSync - syncStart)/syncPulsesPerLine)*num_pixel_X)))
+					currentPixel = int(np.floor((((currentSync - syncStart) / \
+											syncPulsesPerLine)*num_pixel_X)))
 					tmpchan   = channel[event]
 					tmptcspc  = tcspc[event]
 
 					if currentPixel < num_pixel_X:
-						flim_data_stack[currentLine][currentPixel][tmpchan][tmptcspc] += 1
+						flim_data_stack[currentPixel][
+										currentLine][
+										tmpchan][
+										tmptcspc] += 1
 						
 		# Piezo Scan Read
 		elif (ImgHdr_Ident == 1) or (ImgHdr_Ident == 6):
@@ -614,23 +702,24 @@ class PTUreader():
 			num_of_detectors = np.unique(channel).size
 
 			# Initialize flim_data_stack with zeros
-			flim_data_stack = np.zeros((num_pixel_Y, num_pixel_X,
+			flim_data_stack = np.zeros((num_pixel_X, num_pixel_Y,
 											num_of_detectors,
 											num_tcspc_channel),
-											dtype  = np.uint8)
+												dtype  = np.uint8)
 
 			# Markers necessary to make FLIM image stack
 			LineStartMarker = 2**(ImgHdr_LineStart-1)
 			LineStopMarker  = 2**(ImgHdr_LineStop-1)
-
-			L1  = sync[np.where(special == LineStartMarker)] # Get Line start marker sync values
-			L2  = sync[np.where(special == LineStopMarker)]  # Get Line stop marker sync values
+			# Get Line start marker sync values
+			L1  = sync[np.where(special == LineStartMarker)]
+			# Get Line stop marker sync values
+			L2  = sync[np.where(special == LineStopMarker)]
 
 			syncPulsesPerLine = np.floor(np.mean(L2[10:] - L1[10:])) 
 
 			# Sync range to read out
-
-			read_data_range = np.where(sync == L2[-1])[0][0] # finds the location of last valid line marker event
+			# find the location of last valid line marker event
+			read_data_range = np.where(sync == L2[-1])[0][0]
 
 			# Initialize Variable
 			currentLine = 0
@@ -665,17 +754,21 @@ class PTUreader():
 				if (isPhoton and insideLine):
 					tmpchan   = channel[event]
 					tmptcspc  = tcspc[event]
-					currentPixel = int(np.floor((((currentSync - syncStart)/syncPulsesPerLine)*num_pixel_X)))
+					currentPixel = int(np.floor((((currentSync - syncStart) / \
+											syncPulsesPerLine)*num_pixel_X)))
 
 					if currentPixel < num_pixel_X:
-						flim_data_stack[currentLine][currentPixel][tmpchan][tmptcspc] +=1		   
+						flim_data_stack[currentPixel][
+										currentLine][
+										tmpchan][
+										tmptcspc] += 1
 
-		intensity_image = np.zeros((num_pixel_Y, num_pixel_X),
-									dtype  = np.uint64)
-		intensity_image = np.sum(flim_data_stack, axis = 2)
-		intensity_image = np.sum(intensity_image, axis = 2)
+	#	intensity_image = np.zeros((num_pixel_X), num_pixel_Y,
+	#								dtype  = np.uint64)
+	#	intensity_image = np.sum(flim_data_stack, axis = 2)
+	#	intensity_image = np.sum(intensity_image, axis = 2)
 
-		return flim_data_stack, intensity_image
+		return flim_data_stack#, intensity_image
 
 if __name__ == '__main__':
 	pass

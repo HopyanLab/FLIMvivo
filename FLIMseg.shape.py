@@ -148,10 +148,12 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 	############################################################################
 		if space_resolution == 0.:
 			space_resolution = ptu_stream.head['ImgHdr_PixResol']
-		shape_from_tif(tif_files[
+		centroids, vectors = shape_from_tif(tif_files[
 					np.abs(tif_files[:,0] - ptu_file[0]).argmin(), 1],
 						output_dir = output_dir,
 						space_resolution = space_resolution)
+		vectors[1:] = vectors[1:] / \
+						np.linalg.norm(vectors[1:], axis = 1)[:,np.newaxis]
 		if data_array.shape[2] == 0:
 			number_time_bins = int(np.ceil(flim_data_stack.shape[-1] / \
 											 time_bin_factor))
@@ -184,23 +186,66 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 				segments = np.append(segments,0)
 			number_segments = len(segments)
 			data_array.resize(len(ptu_files),
-								number_segments, number_time_bins)
-		current_file_data = np.zeros([number_segments, number_time_bins])
+								3*number_segments, number_time_bins)
+		current_file_data = np.zeros([3*number_segments, number_time_bins])
 		padding_needed = number_time_bins - len(binned_data_stack)
 		current_file_data[0,:] = np.pad(np.sum(binned_data_stack, axis = (0,1)),
 								(0, max(0, padding_needed)),
 								mode = 'constant')[:number_time_bins]
+		y_pixels, x_pixels = np.ogrid[:flim_data_stack.shape[1],
+										:flim_data_stack.shape[0]]
 		for segment in range(1, number_segments):
+			centre = centroids[segment]
+			vector = vectors[segment]
+			x_shifted = x_pixels - centre[0]
+			y_shifted = y_pixels - centre[1]
+			cosines = np.abs(x_shifted*vector[0] + y_shifted*vector[1]) / \
+							np.sqrt(x_shifted**2 + y_shifted**2)
+			segment_points = (seg_mask == segment)
+			long_points = (cosines >= np.sqrt(0.5))
+			short_points = (cosines <= np.sqrt(0.5))
 			if dilation == 0:
-				current_file_data[segment,:] = np.pad(np.sum(
-									(seg_mask == segment)[:,:,np.newaxis] * \
+				# whole segment
+				current_file_data[3*segment,:] = np.pad(np.sum(
+									segment_points[:,:,np.newaxis] * \
+											binned_data_stack, axis = (0,1)),
+								(0, max(0, padding_needed)),
+								mode = 'constant')[:number_time_bins]
+				# long direction
+				current_file_data[3*segment+1,:] = np.pad(np.sum(
+									(segment_points * \
+										long_points)[:,:,np.newaxis] * \
+											binned_data_stack, axis = (0,1)),
+								(0, max(0, padding_needed)),
+								mode = 'constant')[:number_time_bins]
+				# short direction
+				current_file_data[3*segment+2,:] = np.pad(np.sum(
+									(segment_points * \
+										short_points)[:,:,np.newaxis] * \
 											binned_data_stack, axis = (0,1)),
 								(0, max(0, padding_needed)),
 								mode = 'constant')[:number_time_bins]
 			else:
-				current_file_data[segment,:] = np.pad(np.sum(
-						binary_dilation(seg_mask == segment,
+				# whole segment
+				current_file_data[3*segment,:] = np.pad(np.sum(
+						binary_dilation(segment_points,
 								iterations = dilation)[:,:,np.newaxis] * \
+											binned_data_stack, axis = (0,1)),
+								(0, max(0, padding_needed)),
+								mode = 'constant')[:number_time_bins]
+				# long direction
+				current_file_data[3*segment+1,:] = np.pad(np.sum(
+						(binary_dilation(segment_points,
+								iterations = dilation) * \
+									long_points)[:,:,np.newaxis] * \
+											binned_data_stack, axis = (0,1)),
+								(0, max(0, padding_needed)),
+								mode = 'constant')[:number_time_bins]
+				# short direction
+				current_file_data[3*segment+2,:] = np.pad(np.sum(
+						(binary_dilation(segment_points,
+								iterations = dilation) * \
+									short_points)[:,:,np.newaxis] * \
 											binned_data_stack, axis = (0,1)),
 								(0, max(0, padding_needed)),
 								mode = 'constant')[:number_time_bins]
@@ -210,6 +255,8 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		print('-------------------------------------\n')
 	############################################################################
 	# Align peaks across time points. (Not sure it is a good idea.)
+	#   After testing, it appears to be a bad idea. Translates noise in
+	#    measurement amplitude into temporal shifts. Bad results.
 	############################################################################
 	#peak_time = np.argmax(data_array[:,0,:], axis = 1)
 	#time_shifts = peak_time - np.min(peak_time)
@@ -226,8 +273,23 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		data = np.vstack([time_points,
 				np.sum(data_array[:,segment,:], axis=0)]).T
 	#	data[:,1] = data[:,1] / np.max(data[:,1])
-		np.savetxt(output_dir / 'segments' / \
-						'segment_{0:d}.csv'.format(segment),
+		if segment % 3 == 0:
+			np.savetxt(output_dir / 'segments' / \
+						'segment_{0:d}.csv'.format(int(np.floor(segment/3))),
+											data,
+											delimiter = ',')
+		elif segment % 3 == 1:
+			if int(np.floor(segment/3)) == 0:
+				continue
+			np.savetxt(output_dir / 'segments' / \
+					'segment_{0:d}.long.csv'.format(int(np.floor(segment/3))),
+											data,
+											delimiter = ',')
+		else:
+			if int(np.floor(segment/3)) == 0:
+				continue
+			np.savetxt(output_dir / 'segments' / \
+					'segment_{0:d}.short.csv'.format(int(np.floor(segment/3))),
 											data,
 											delimiter = ',')
 	proc = subprocess.Popen(['python', str(rootpath / 'FLIMvivo.py'),
@@ -305,6 +367,7 @@ def shape_from_tif (tif_file, output_dir = Path.cwd(),
 	if 0 not in segments:
 		segments = np.append(segments,0)
 	centroids = np.zeros((len(segments),3))
+	vectors = np.zeros((len(segments),3))
 	for segment in segments:
 		if segment == 0:
 			continue
@@ -332,6 +395,8 @@ def shape_from_tif (tif_file, output_dir = Path.cwd(),
 		average_length = np.mean(np.linalg.norm(boundary_points, axis = 1))
 		U, s, V = np.linalg.svd(boundary_points / average_length)
 		s_scaled = s / np.mean(s)
+		vectors[segment,0] = segment
+		vectors[segment,1:] = s_scaled
 		plt.plot([-V[0,0]*s_scaled[0]*average_length + centroid[0],
 					V[0,0]*s_scaled[0]*average_length + centroid[0]],
 				 [-V[0,1]*s_scaled[0]*average_length + centroid[1],
@@ -370,6 +435,8 @@ def shape_from_tif (tif_file, output_dir = Path.cwd(),
 					centroids, delimiter = ',', fmt='%d\t%1.9f\t%1.9f')
 	plt.savefig(output_dir / (tif_file.with_suffix('.shape.output.png').name))
 	plt.clf()
+	return centroids[centroids[:,0].argsort(),1:], \
+			vectors[vectors[:,0].argsort(),1:]
 
 ################################################################################
 # Main function uses argparse to take directories and process files.
