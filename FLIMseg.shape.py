@@ -47,6 +47,9 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 			number = int(re.split('[\s_]+', tif_file.stem)[-2].lstrip('t'))
 		tif_files = np.append(tif_files, np.array([[number,
 													tif_file]]), axis = 0)
+	# sort them by number
+	ptu_files = ptu_files[ptu_files[:, 0].argsort()]
+	tif_files = tif_files[tif_files[:, 0].argsort()]
 	#	shape_from_tif(tif_file, output_dir = output_dir)
 	print('-------------------------------------\n')
 	if len(tif_files) == 0:
@@ -123,28 +126,37 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		scaled_intensity = intensity_image[
 							::int(len(intensity_image)/len(seg_mask)),
 							::int(len(intensity_image[0])/len(seg_mask[0]))]
-		ax1.imshow(scaled_intensity + (seg_mask > 0) * \
-					(np.amax(scaled_intensity) - scaled_intensity),
+		#scaled_intensity = np.sqrt(scaled_intensity)
+		seg_image = (seg_mask > 0)*1
+		seg_alpha = (seg_mask > 0)*.6
+		ax1.imshow(scaled_intensity,
+						cmap = plt.get_cmap('afmhot'),
 						origin = 'lower')
-		# Bug in matplotlib 3.1.1 (current Windows Anaconda) makes the
-		#  following crash. Some issue with how opacity is handled.
-		#seg_image = (seg_mask > 0)*1
-		#seg_alpha = (seg_mask > 0)*.3
-		#ax1.imshow(intensity_image[::int(len(intensity_image)/len(seg_mask)),
-		#				   ::int(len(intensity_image[0])/len(seg_mask[0]))])
-		#ax1.imshow(seg_image, alpha = seg_alpha)
+		ax1.imshow(seg_image, alpha = seg_alpha,
+						cmap = plt.get_cmap('gray'),
+						origin = 'lower')
+		# Bug in matplotlib 3.1.1  makes the above crash.
+		#  Some issue with how opacity is handled.
+		#  Below code works as an alternative, but is uglier.
+		#ax1.imshow(scaled_intensity + (seg_mask > 0) * \
+		#			(np.amax(scaled_intensity) - scaled_intensity),
+		#				cmap = plt.get_cmap('afmhot'),
+		#				origin = 'lower')
 		ax2.imshow(scaled_intensity,
+						cmap = plt.get_cmap('afmhot'),
 						origin = 'lower')
 		for segment in np.unique(seg_mask[seg_mask > 0]):
 			segment_points = np.where(seg_mask == segment)
 			centroid = np.mean(segment_points, axis = 1)
-			ax2.plot(centroid[1], centroid[0], 'r.')
+			ax2.plot(centroid[1], centroid[0], 'w.')
 		plt.savefig(output_dir / (ptu_file[1].with_suffix(
 									'.segmentation.png').name))
 		plt.clf()
 		plt.close()
 	############################################################################
-		plt.imshow(scaled_intensity, origin = 'lower')
+		plt.imshow(scaled_intensity,
+						cmap = plt.get_cmap('afmhot'),
+						origin = 'lower')
 	############################################################################
 		if space_resolution == 0.:
 			space_resolution = ptu_stream.head['ImgHdr_PixResol']
@@ -301,7 +313,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 	procout = str(proc.stdout.read().decode('utf-8'))
 	print('Biexponetial convolution fit parameters :')
 	print(procout)
-	params = np.fromstring(procout, dtype = np.float, sep = '\t')
+	params = np.fromstring(procout, dtype = float, sep = '\t')
 	fit_mu = params[-2]
 	fit_sigma = params[-1]
 	autolifetime = params[-3]
@@ -333,7 +345,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 							str(output_dir / 'segments' / 'segment_0.csv')],
 						stdout=subprocess.PIPE)
 		procout = str(proc.stdout.read().decode('utf-8'))
-		params = np.fromstring(procout, dtype = np.float, sep = '\t')
+		params = np.fromstring(procout, dtype = float, sep = '\t')
 		autolifetime = params[-3]
 		fit_mu = params[-2]
 		fit_sigma = params[-1]
@@ -416,7 +428,7 @@ def shape_from_tif (tif_file, output_dir = Path.cwd(),
 				 [-V[1,1]*s_scaled[1]*average_length + centroid[1],
 					V[1,1]*s_scaled[1]*average_length + centroid[1]],'w.')
 		plt.text(centroid[0], centroid[1], '{0:d}'.format(segment),
-					color = 'k', fontsize = 'large', fontweight = 'bold')
+					color = 'white', fontsize = 'large', fontweight = 'bold')
 		axes = plt.gca()
 		figure = plt.gcf()
 		figure.set_size_inches(16,16)
@@ -484,10 +496,10 @@ if __name__ == '__main__':
 		else:
 			print('Path {0:s} does not seem to exist.'.format(str(datapath)))
 		for directory in dirs_to_process:
-		#	try:
-			process_dir(directory, args.bin_factor[0], args.channel[0],
+			try:
+				process_dir(directory, args.bin_factor[0], args.channel[0],
 							args.dilation[0], args.flip_axis)
-		#	except:
-		#		print('-------------------------------------\n')
-		#		print('There was a problem with: ' + str(directory) +'\n')
-		#		print('-------------------------------------\n')
+			except:
+				print('-------------------------------------\n')
+				print('There was a problem with: ' + str(directory) +'\n')
+				print('-------------------------------------\n')
