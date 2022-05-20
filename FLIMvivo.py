@@ -552,7 +552,7 @@ if __name__ == "__main__":
 			parse_args.response[0],
 			parse_args.response[1],
 			parse_args.fit_type]
-	summary_data = np.zeros((0,2))
+	summary_data = np.zeros((0,3))
 	for datapath in datapaths:
 		if datapath.exists():
 			if datapath.is_dir():
@@ -585,13 +585,15 @@ if __name__ == "__main__":
 							]) + os.linesep)
 			try:
 				summary_data = np.append(summary_data,
-					[[int(datafilepath.stem.split('_')[-1]), fit[1]]],
+					[[int(datafilepath.stem.split('_')[-1]),
+					  fit[1],
+					  int(0 if sparse_test else 1)]],
 						axis = 0)
 			except:
 				pass
 	outfile.close()
 	summary_data = summary_data[summary_data[:,0].argsort()]
 	np.savetxt(Path(outfilename).with_suffix('.summary.txt'),
-					summary_data, delimiter='\t', fmt = '%d\t%1.9f')
+					summary_data, delimiter='\t', fmt = '%d\t%1.9f\t%d')
 
 

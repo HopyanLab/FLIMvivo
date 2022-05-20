@@ -2,7 +2,9 @@
 from readPTU_FLIM import PTUreader
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy import ndimage
+#from scipy import ndimage
+from astropy.convolution import Gaussian2DKernel
+from astropy.convolution import convolve, convolve_fft
 from PIL import Image
 from pathlib import Path
 import argparse
@@ -25,11 +27,17 @@ rootpath = Path(os.path.realpath(__file__)).parent.resolve()
 ################################################################################
 
 def process_dir (directory, channel = 0, smoothing = 0,
-				 opacity = 0.3, flip_axis = False):
+				 opacity = 0.5, flip_axis = False):
 	print('Processing: ', directory)
 	output_dir = directory/'FLIMseg-output'
 	summary_file = output_dir/'FLIMvivo.output.summary.txt'
 	results = np.genfromtxt(summary_file, delimiter = '\t', dtype = float)
+	has_fit_check = (results.shape[1] == 3)
+	if has_fit_check:
+		good_segments = np.array([results[:,0],results[:,2]], dtype = int).T
+		results[:,2] = 0
+	else:
+		results = np.pad(results, ((0,0),(0,1)))
 	ptu_files = np.empty(shape = [0,2])
 	tif_files = np.empty(shape = [0,2])
 	for ptu_file in directory.glob('*.ptu'):
@@ -63,29 +71,37 @@ def process_dir (directory, channel = 0, smoothing = 0,
 		return
 	seg_mask = np.array(Image.open(
 			tif_files[np.abs(tif_files[:,0] - ptu_files[0,0]).argmin(), 1]))
-	fig, ax = plt.subplots(1,1)
+	fig, (ax,ax2) = plt.subplots(1,2)
 	scaled_intensity = intensity_image[
 						::int(len(intensity_image)/len(seg_mask)),
 						::int(len(intensity_image[0])/len(seg_mask[0]))]
 	seg_image = (seg_mask > 0)*1.
-	seg_image[seg_mask == 0] = np.amin(results[:,1])
+	seg_image[seg_mask == 0] = np.nan
 	for segment in np.unique(seg_mask[seg_mask > 0]):
 		segment_points = np.where(seg_mask == segment)
 		seg_image[segment_points] = results[results[:,0] == segment,1]
+		if has_fit_check:
+			if not good_segments[good_segments[:,0] == segment, 1]:
+				seg_image[segment_points] = np.nan
 	seg_alpha = (seg_mask > 0)*opacity
 	if smoothing > 0:
-		seg_image = ndimage.gaussian_filter(seg_image,
-						sigma=(smoothing, smoothing), order=0)
+		kernel = Gaussian2DKernel(x_stddev = smoothing,
+								  y_stddev = smoothing)
+		seg_image = convolve(seg_image, kernel, boundary = 'extend')
 	heatmap = ax.imshow(seg_image,
 				cmap = plt.get_cmap('jet'),
+				interpolation = 'none',
 				origin = 'lower')
 	ax.imshow(np.sqrt(scaled_intensity),
-				cmap = plt.get_cmap('Greys'),
+				cmap = plt.get_cmap('binary_r'),
+				interpolation = 'none',
 				origin = 'lower')
 	ax.imshow(seg_image, alpha = seg_alpha,
 				cmap = plt.get_cmap('jet'),
+				interpolation = 'none',
 				origin = 'lower')
-	plt.colorbar(heatmap)
+	plt.colorbar(heatmap, ax=ax, orientation = 'vertical',
+					fraction=0.046, pad=0.04)
 	plt.savefig(output_dir / (ptu_files[0,1].with_suffix(
 								'.heatmap.png').name))
 	plt.clf()
@@ -112,10 +128,10 @@ if __name__ == '__main__':
 						help = 'guassian smooth result (default 0)')
 	parser.add_argument('-o', '--opac', dest='opacity',
 						nargs = 1,
-						default = [0.3],
+						default = [0.5],
 						type = float,
 						required = False,
-						help = 'opacity for heatmap overlay (default 0.3)')
+						help = 'opacity for heatmap overlay (default 0.5)')
 	parser.add_argument('-f', '--flip', dest='flip_axis',
 						action='store_const',
 						const=True, default=False,
@@ -138,12 +154,12 @@ if __name__ == '__main__':
 		else:
 			print('Path {0:s} does not seem to exist.'.format(str(datapath)))
 		for directory in dirs_to_process:
-			try:
-				process_dir(directory, args.channel[0], 
-							args.smoothing[0], args.opacity,
-							args.flip_axis)
-			except:
-				print('-------------------------------------\n')
-				print('There was a problem with: ' + str(directory) +'\n')
-				print('Have you run FLIMseg.py yet?')
-				print('-------------------------------------\n')
+		#	try:
+			process_dir(directory, args.channel[0], 
+						args.smoothing[0], args.opacity,
+						args.flip_axis)
+		#	except:
+		#		print('-------------------------------------\n')
+		#		print('There was a problem with: ' + str(directory) +'\n')
+		#		print('Have you run FLIMseg.py yet?')
+		#		print('-------------------------------------\n')

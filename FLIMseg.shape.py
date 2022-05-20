@@ -26,7 +26,8 @@ rootpath = Path(os.path.realpath(__file__)).parent.resolve()
 ################################################################################
 
 def process_dir (directory, time_bin_factor = 1, channel = 0,
-					dilation = 0, flip_axis = False):
+					dilation = 0, flip_axis = False,
+					colormap_name = 'binary_r'):
 	print('Processing: ', directory)
 	output_dir = directory/'FLIMseg-output'
 	Path.mkdir(output_dir, exist_ok = True)
@@ -126,36 +127,58 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		scaled_intensity = intensity_image[
 							::int(len(intensity_image)/len(seg_mask)),
 							::int(len(intensity_image[0])/len(seg_mask[0]))]
-		#scaled_intensity = np.sqrt(scaled_intensity)
+		if np.mean(scaled_intensity) < 0.2 * \
+					(np.amax(scaled_intensity)-np.amin(scaled_intensity)):
+			scaled_intensity = np.sqrt(scaled_intensity)
+	#	default_colormap = plt.get_cmap('afmhot')
+	#	default_colormap = plt.get_cmap('inferno')
+	#	default_colormap = plt.get_cmap('magma')
+	#	default_colormap = plt.get_cmap('plasma')
+	#	default_colormap = plt.get_cmap('viridis')
+	#	default_colormap = plt.get_cmap('cividis')
+	#	default_colormap = plt.get_cmap('copper')
+	#	default_colormap = plt.get_cmap('bone')
+		default_colormap = plt.get_cmap(colormap_name)
 		seg_image = (seg_mask > 0)*1
 		seg_alpha = (seg_mask > 0)*.6
 		ax1.imshow(scaled_intensity,
-						cmap = plt.get_cmap('afmhot'),
+						cmap = default_colormap,
+						interpolation = 'none',
 						origin = 'lower')
 		ax1.imshow(seg_image, alpha = seg_alpha,
 						cmap = plt.get_cmap('gray'),
+						interpolation = 'none',
 						origin = 'lower')
 		# Bug in matplotlib 3.1.1  makes the above crash.
 		#  Some issue with how opacity is handled.
 		#  Below code works as an alternative, but is uglier.
 		#ax1.imshow(scaled_intensity + (seg_mask > 0) * \
 		#			(np.amax(scaled_intensity) - scaled_intensity),
-		#				cmap = plt.get_cmap('afmhot'),
+		#				cmap = default_colormap,
 		#				origin = 'lower')
 		ax2.imshow(scaled_intensity,
-						cmap = plt.get_cmap('afmhot'),
+						cmap = default_colormap,
+						interpolation = 'none',
 						origin = 'lower')
 		for segment in np.unique(seg_mask[seg_mask > 0]):
 			segment_points = np.where(seg_mask == segment)
 			centroid = np.mean(segment_points, axis = 1)
-			ax2.plot(centroid[1], centroid[0], 'w.')
+			ax2.plot(centroid[1], centroid[0], 
+						marker = '.',
+						markersize = 3,
+						color = 'white')
+			ax2.text(centroid[1]+2, centroid[0]-5, segment,
+						multialignment = 'center',
+						fontsize = 'x-small',
+						color = 'white')
 		plt.savefig(output_dir / (ptu_file[1].with_suffix(
 									'.segmentation.png').name))
 		plt.clf()
 		plt.close()
 	############################################################################
 		plt.imshow(scaled_intensity,
-						cmap = plt.get_cmap('afmhot'),
+						cmap = default_colormap,
+						interpolation = 'none',
 						origin = 'lower')
 	############################################################################
 		if space_resolution == 0.:
