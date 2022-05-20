@@ -265,7 +265,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 						'segment_{0:d}.csv'.format(segment),
 											data,
 											delimiter = ',')
-	proc = subprocess.Popen(['python', str(rootpath / 'FLIMvivo.py'),
+	proc = subprocess.Popen(['python3', str(rootpath / 'FLIMvivo.py'),
 							'-o', str(output_dir / 'FLIMvivo.output.txt'),
 							'-f',
 							'-b',
@@ -300,7 +300,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 	if deviation > threshold:
 		print('Biexponetial fit questionable. Reverting to monoexponential.\n')
 		print('-------------------------------------\n')
-		proc = subprocess.Popen(['python', str(rootpath / 'FLIMvivo.py'),
+		proc = subprocess.Popen(['python3', str(rootpath / 'FLIMvivo.py'),
 							'-o', str(output_dir / 'FLIMvivo.output.txt'),
 							'-c',
 							str(output_dir / 'segments' / 'segment_0.csv')],
@@ -310,14 +310,14 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		autolifetime = params[-3]
 		fit_mu = params[-2]
 		fit_sigma = params[-1]
-		subprocess.call(['python', str(rootpath / 'FLIMvivo.py'),
+		subprocess.call(['python3', str(rootpath / 'FLIMvivo.py'),
 						'-o', str(output_dir / 'FLIMvivo.output.txt'),
 						'-f',
 						'-a', str(autolifetime),
 						'-r', str(fit_mu), str(fit_sigma),
 						str(output_dir / 'segments')])
 	else:
-		subprocess.call(['python', str(rootpath / 'FLIMvivo.py'),
+		subprocess.call(['python3', str(rootpath / 'FLIMvivo.py'),
 						'-o', str(output_dir / 'FLIMvivo.output.txt'),
 						'-f',
 						'-b',

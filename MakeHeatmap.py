@@ -2,6 +2,7 @@
 from readPTU_FLIM import PTUreader
 import numpy as np
 from matplotlib import pyplot as plt
+from scipy import optimize
 #from scipy import ndimage
 from astropy.convolution import Gaussian2DKernel
 from astropy.convolution import convolve, convolve_fft
@@ -27,7 +28,8 @@ rootpath = Path(os.path.realpath(__file__)).parent.resolve()
 ################################################################################
 
 def process_dir (directory, channel = 0, smoothing = 0,
-				 opacity = 0.5, flip_axis = False):
+				 opacity = 0.5, remove_bad = False,
+				 correlation = False, flip_axis = False):
 	print('Processing: ', directory)
 	output_dir = directory/'FLIMseg-output'
 	summary_file = output_dir/'FLIMvivo.output.summary.txt'
@@ -71,16 +73,18 @@ def process_dir (directory, channel = 0, smoothing = 0,
 		return
 	seg_mask = np.array(Image.open(
 			tif_files[np.abs(tif_files[:,0] - ptu_files[0,0]).argmin(), 1]))
-	fig, (ax,ax2) = plt.subplots(1,2)
 	scaled_intensity = intensity_image[
 						::int(len(intensity_image)/len(seg_mask)),
 						::int(len(intensity_image[0])/len(seg_mask[0]))]
 	seg_image = (seg_mask > 0)*1.
 	seg_image[seg_mask == 0] = np.nan
+	results[results[:,0] == 0, 2] = np.mean(scaled_intensity)
 	for segment in np.unique(seg_mask[seg_mask > 0]):
 		segment_points = np.where(seg_mask == segment)
 		seg_image[segment_points] = results[results[:,0] == segment,1]
-		if has_fit_check:
+		results[results[:,0] == segment,2] = \
+				np.mean(scaled_intensity[segment_points])
+		if has_fit_check and remove_bad:
 			if not good_segments[good_segments[:,0] == segment, 1]:
 				seg_image[segment_points] = np.nan
 	seg_alpha = (seg_mask > 0)*opacity
@@ -88,6 +92,24 @@ def process_dir (directory, channel = 0, smoothing = 0,
 		kernel = Gaussian2DKernel(x_stddev = smoothing,
 								  y_stddev = smoothing)
 		seg_image = convolve(seg_image, kernel, boundary = 'extend')
+	if correlation:
+		def fit_function(x, a, b):
+			return -a*x + b
+		fit_params, covar = optimize.curve_fit(fit_function,
+									results[:,1], results[:,2])
+		fig, (ax,ax2) = plt.subplots(1,2, figsize=(10,6))
+		ax2.plot(results[:,1],results[:,2],
+					marker = '.', linestyle = '',
+					color = 'black')
+		ax2.plot(results[:,1],fit_function(results[:,1],*fit_params),
+					marker = '', linestyle = '-',
+					color = 'red')
+		aspect = np.diff(ax2.get_xlim())[0] / np.diff(ax2.get_ylim())[0]
+		ax2.set_aspect(aspect)
+		print(fit_params)
+		print(covar)
+	else:
+		fig, ax = plt.subplots(1,1, figsize = (6,6))
 	heatmap = ax.imshow(seg_image,
 				cmap = plt.get_cmap('jet'),
 				interpolation = 'none',
@@ -102,8 +124,16 @@ def process_dir (directory, channel = 0, smoothing = 0,
 				origin = 'lower')
 	plt.colorbar(heatmap, ax=ax, orientation = 'vertical',
 					fraction=0.046, pad=0.04)
+	fig.tight_layout()
 	plt.savefig(output_dir / (ptu_files[0,1].with_suffix(
 								'.heatmap.png').name))
+#	plt.subplots_adjust(
+#		left  = 0.125, # the left side of the subplots of the figure
+#		right = 0.9,   # the right side of the subplots of the figure
+#		bottom = 0.1,  # the bottom of the subplots of the figure
+#		top = 0.9,     # the top of the subplots of the figure
+#		wspace = 0.2,  # the width reserved for blank space between subplots
+#		hspace = 0.2)  # the height reserved for white space between subplots
 	plt.clf()
 	plt.close()
 
@@ -132,6 +162,14 @@ if __name__ == '__main__':
 						type = float,
 						required = False,
 						help = 'opacity for heatmap overlay (default 0.5)')
+	parser.add_argument('-r', '--remove', dest='remove_bad',
+						action='store_const',
+						const=True, default=False,
+						help = 'remove segments where fit was not great')
+	parser.add_argument('-x', '--corr', dest='correlation',
+						action='store_const',
+						const=True, default=False,
+						help = 'check correlation between fits and intensity')
 	parser.add_argument('-f', '--flip', dest='flip_axis',
 						action='store_const',
 						const=True, default=False,
@@ -154,12 +192,16 @@ if __name__ == '__main__':
 		else:
 			print('Path {0:s} does not seem to exist.'.format(str(datapath)))
 		for directory in dirs_to_process:
-		#	try:
-			process_dir(directory, args.channel[0], 
-						args.smoothing[0], args.opacity,
-						args.flip_axis)
-		#	except:
-		#		print('-------------------------------------\n')
-		#		print('There was a problem with: ' + str(directory) +'\n')
-		#		print('Have you run FLIMseg.py yet?')
-		#		print('-------------------------------------\n')
+			try:
+				process_dir(directory,
+							args.channel[0],
+							args.smoothing[0],
+							args.opacity,
+							args.remove_bad,
+							args.correlation,
+							args.flip_axis)
+			except:
+				print('-------------------------------------\n')
+				print('There was a problem with: ' + str(directory) +'\n')
+				print('Have you run FLIMseg.py yet?')
+				print('-------------------------------------\n')
