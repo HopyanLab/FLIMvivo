@@ -392,9 +392,12 @@ def FastConvolutionFit(filepath,
 	best_params = fit_params[best_fit]
 	fit_points = fit_function(time_points, *best_params)
 	#
-	test_threshold = 0.01
-	test_set = np.unique(data_points[endpoint-16:endpoint])
-	test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
+	if endpoint - startpoint < 60:
+		test = False
+	else:
+		test_threshold = 0.02
+		test_set = np.unique(data_points[endpoint-60:endpoint])
+		test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
 	#
 	fig = plt.figure(figsize=(16,7))
 	gs = gridspec.GridSpec(1, 3, width_ratios=[0.8, 1.6, 1])

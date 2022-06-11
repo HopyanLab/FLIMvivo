@@ -71,6 +71,8 @@ def process_dir (directory, channel = 0, smoothing = 0,
 		print('There was a problem reading. \nTerminating.\n')
 		print('-------------------------------------\n')
 		return
+	(Image.fromarray(intensity_image.astype('uint8'))).save(output_dir / \
+			(ptu_files[0,1].with_suffix('.intensity.tif').name))
 	seg_mask = np.array(Image.open(
 			tif_files[np.abs(tif_files[:,0] - ptu_files[0,0]).argmin(), 1]))
 	scaled_intensity = intensity_image[
@@ -192,16 +194,16 @@ if __name__ == '__main__':
 		else:
 			print('Path {0:s} does not seem to exist.'.format(str(datapath)))
 		for directory in dirs_to_process:
-			try:
-				process_dir(directory,
+		#	try:
+			process_dir(directory,
 							args.channel[0],
 							args.smoothing[0],
 							args.opacity,
 							args.remove_bad,
 							args.correlation,
 							args.flip_axis)
-			except:
-				print('-------------------------------------\n')
-				print('There was a problem with: ' + str(directory) +'\n')
-				print('Have you run FLIMseg.py yet?')
-				print('-------------------------------------\n')
+		#	except:
+		#		print('-------------------------------------\n')
+		#		print('There was a problem with: ' + str(directory) +'\n')
+		#		print('Have you run FLIMseg.py yet?')
+		#		print('-------------------------------------\n')
