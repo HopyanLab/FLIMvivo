@@ -395,7 +395,7 @@ def FastConvolutionFit(filepath,
 	if endpoint - startpoint < 60:
 		test = False
 	else:
-		test_threshold = 0.02
+		test_threshold = 0.03
 		test_set = np.unique(data_points[endpoint-60:endpoint])
 		test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
 	#
@@ -555,7 +555,11 @@ if __name__ == "__main__":
 			parse_args.response[0],
 			parse_args.response[1],
 			parse_args.fit_type]
-	summary_data = np.zeros((0,3))
+	if not parse_args.biexponential:
+		summary_data = np.zeros((0,4), dtype = float)
+	else:
+		summary_data = np.zeros((0,6), dtype = float)
+	autolife = parse_args.autolife[0]
 	for datapath in datapaths:
 		if datapath.exists():
 			if datapath.is_dir():
@@ -587,16 +591,40 @@ if __name__ == "__main__":
 							'sparse' if sparse_test else 'good'
 							]) + os.linesep)
 			try:
-				summary_data = np.append(summary_data,
-					[[int(datafilepath.stem.split('_')[-1]),
-					  fit[1],
-					  int(0 if sparse_test else 1)]],
+				if not parse_args.biexponential:
+					summary_data = np.append(summary_data,
+						[[int(datafilepath.stem.split('_')[-1]),
+						  fit[1],
+						  fit[0],
+						  int(0 if sparse_test else 1)]],
+						axis = 0)
+				else:
+					if parse_args.autolife[0] == 0.:
+						autolife = fit[3]
+					summary_data = np.append(summary_data,
+						[[int(datafilepath.stem.split('_')[-1]),
+						  fit[1],
+						  fit[0],
+						  autolife,
+						  fit[2],
+						  int(0 if sparse_test else 1)]],
 						axis = 0)
 			except:
 				pass
 	outfile.close()
 	summary_data = summary_data[summary_data[:,0].argsort()]
+	if not parse_args.biexponential:
+		header = 'segment\tsignal_lifetime\t' + \
+				 'signal_amplitude\tfit_good'
+		fmt = '%d\t%1.9f\t%1.9f\t%d'
+	else:
+		header = 'segment\tsignal_lifetime\tsignal_amplitude\t' + \
+				 'autoflourescent_lifetime\tautoflourescent_amplitude\tfit_good'
+		fmt = '%d\t%1.9f\t%1.9f\t%1.9f\t%1.9f\t%d'
 	np.savetxt(Path(outfilename).with_suffix('.summary.txt'),
-					summary_data, delimiter='\t', fmt = '%d\t%1.9f\t%d')
+					summary_data,
+					delimiter = '\t',
+					header = header,
+					fmt = fmt)
 
 
