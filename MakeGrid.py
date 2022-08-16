@@ -17,14 +17,14 @@ def generate_grid (n = 4, maskfile = None):
 	for i in range(M):
 		for j in range(M):
 			if mask is not None:
-				if mask[int(np.floor((i+1/2)*N)),
-						int(np.floor((j+1/2)*N)),0]==0:
+				if np.all(mask[int(np.floor((i+1/2)*N)),
+							   int(np.floor((j+1/2)*N))]==0):
 					continue
 			for a in range(N):
 				for b in range(N):
 					grid[i*N+a,j*N+b] = counter
 			counter += 1
-#	print(grid)
+	print(grid)
 #	plt.imshow(grid)
 #	plt.show()
 	im = Image.fromarray(grid)
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 						type = str,
 						required = False,
 						help = 'file to mask off grid boxes')
-	parser.add_argument('n', type=int, nargs='?', default=5,
+	parser.add_argument('n', type=int, nargs='?', default=4,
 						help='level of courseness (min 1 / default 4 / max 8)')
 	#
 	parse_args = parser.parse_args()
