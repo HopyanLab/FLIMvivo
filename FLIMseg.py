@@ -187,6 +187,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 					np.abs(tif_files[:,0] - ptu_file[0]).argmin(), 1],
 						output_dir = output_dir,
 						space_resolution = space_resolution)
+		print('Done shape analysis.')
 		if data_array.shape[2] == 0:
 			number_time_bins = int(np.ceil(flim_data_stack.shape[-1] / \
 											 time_bin_factor))
@@ -205,14 +206,18 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 		flim_data_stack = spacial_binned_data[::binning_factor_x,
 											  ::binning_factor_y, :]
 		# Now do time binning.
-		binned_data_stack = flim_data_stack[:, :, ::time_bin_factor]
-		for start_id in range(1,time_bin_factor):
-			binned_data_stack += np.pad(flim_data_stack[:,:,
-											start_id::time_bin_factor],
-										((0,0),(0,0),(0,
-					len(flim_data_stack[0,0,::time_bin_factor]) - \
-					len(flim_data_stack[0,0,start_id::time_bin_factor]))),
-										mode = 'constant')
+		if time_bin_factor > 1:
+			binned_data_stack = flim_data_stack[:, :, ::time_bin_factor]
+			for start_id in range(1,time_bin_factor):
+				binned_data_stack += np.pad(flim_data_stack[:,:,
+												start_id::time_bin_factor],
+											((0,0),(0,0),(0,
+						len(flim_data_stack[0,0,::time_bin_factor]) - \
+						len(flim_data_stack[0,0,start_id::time_bin_factor]))),
+											mode = 'constant')
+		else:
+			binned_data_stack = flim_data_stack
+		print('Done binning.')
 		if data_array.shape[1] == 0:
 			segments = np.unique(seg_mask)
 			if 0 not in segments:
@@ -226,6 +231,7 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 								(0, max(0, padding_needed)),
 								mode = 'constant')[:number_time_bins]
 		for segment in range(1, number_segments):
+			print(f'Segment {segment:d} data of {number_segments-1:d}')
 			if dilation == 0:
 				current_file_data[segment,:] = np.pad(np.sum(
 									(seg_mask == segment)[:,:,np.newaxis] * \
@@ -239,6 +245,8 @@ def process_dir (directory, time_bin_factor = 1, channel = 0,
 											binned_data_stack, axis = (0,1)),
 								(0, max(0, padding_needed)),
 								mode = 'constant')[:number_time_bins]
+			count = int(np.sum(current_file_data[segment,:]))
+			print(f'\tdetector count: {count:d}')
 		data_array[current_file] = current_file_data
 		current_file += 1
 		print('Successfully processed.\n')
