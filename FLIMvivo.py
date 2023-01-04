@@ -94,7 +94,10 @@ def FindEndpoint(time_points, data_points,
 	peak_index = np.argmax(data_points)
 	peak_value = data_points[peak_index]
 	mask = data_points[peak_index:] < peak_value * 0.2
-	initial_index = peak_index + np.amin(np.where(mask))
+	if np.any(mask):
+		initial_index = peak_index + np.amin(np.where(mask))
+	else:
+		initial_index = peak_index + 24
 	index_range = len(time_points) - initial_index
 	total_N = coarse_N + fine_N
 	endpoints = np.zeros(total_N,dtype=int)
@@ -344,7 +347,7 @@ def FastConvolutionFit(filepath,
 						passed_mu, passed_sigma,
 						fit_type = 'NLL'):
 	time_points, data_points = ExtractData(datafilepath)
-	time_points, data_points = CutData(time_points, data_points)
+	plt.plot(time_points, data_points,'.')
 	peak_index = np.argmax(data_points)
 	peak_value = data_points[peak_index]
 	IRF_centre_guess = time_points[peak_index]-0.12
