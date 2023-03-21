@@ -94,10 +94,7 @@ def FindEndpoint(time_points, data_points,
 	peak_index = np.argmax(data_points)
 	peak_value = data_points[peak_index]
 	mask = data_points[peak_index:] < peak_value * 0.2
-	if np.any(mask):
-		initial_index = peak_index + np.amin(np.where(mask))
-	else:
-		initial_index = peak_index + 24
+	initial_index = peak_index + np.amin(np.where(mask))
 	index_range = len(time_points) - initial_index
 	total_N = coarse_N + fine_N
 	endpoints = np.zeros(total_N,dtype=int)
@@ -347,33 +344,33 @@ def FastConvolutionFit(filepath,
 						passed_mu, passed_sigma,
 						fit_type = 'NLL'):
 	time_points, data_points = ExtractData(datafilepath)
-	plt.plot(time_points, data_points,'.')
+	time_points, data_points = CutData(time_points, data_points)
 	peak_index = np.argmax(data_points)
 	peak_value = data_points[peak_index]
-	IRF_centre_guess = time_points[peak_index]-0.12
-	IRF_width_guess = 0.08
+	IRF_centre_guess = time_points[peak_index]-0.24 # 0.12
+	IRF_width_guess = 0.12 # 0.08
 	if biexp:
 		if autolife == 0.:
 			if passed_mu == 0. or passed_sigma == 0.:
 				fit_function = BEC
-				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value, 0.3,
+				initial_guess = [0.85*peak_value, 3.0, 0.15*peak_value, 0.3,
 								IRF_centre_guess, IRF_width_guess]
 			else:
 				fit_function = lambda x, B, tau2, A, tau1: \
 								BEC(x, B, tau2, A, tau1,
 									passed_mu, passed_sigma)
-				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value,0.3]
+				initial_guess = [0.85*peak_value, 3.0, 0.15*peak_value,0.3]
 		else:
 			if passed_mu == 0. or passed_sigma == 0.:
 				fit_function = lambda x, B, tau2, A, mu, sigma: \
 								BEC(x, B, tau2, A, autolife, mu, sigma)
-				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value,
+				initial_guess = [0.85*peak_value, 3.0, 0.15*peak_value,
 								IRF_centre_guess, IRF_width_guess]
 			else:
 				fit_function = lambda x, B, tau2, A: \
 								BEC(x, B, tau2, A, autolife,
 									passed_mu, passed_sigma)
-				initial_guess = [0.8*peak_value, 3.0, 0.2*peak_value]
+				initial_guess = [0.85*peak_value, 3.0, 0.15*peak_value]
 	else:
 		if passed_mu == 0. or passed_sigma == 0.:
 			fit_function = MEC
