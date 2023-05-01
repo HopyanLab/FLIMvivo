@@ -164,9 +164,12 @@ def CutData (time_points, data_points,
 
 def ExtractData(filepath):
 	# Ignore any broken lines in the file.
+	multiplier = 1
 	fixedfilepath = Path(str(filepath) + '.fixed')
 	with open(fixedfilepath, 'w') as fixedfile, open(filepath, 'r') as infile:
 		for linenumber, line in enumerate(infile):
+			if linenumber == 0 and line[0] == '#' and line[2] == '*':
+				multiplier = float(line.split('*')[1])
 			try:
 				t = float(line.split(',')[0])
 				x = float(line.split(',')[1])
@@ -193,6 +196,7 @@ def ExtractData(filepath):
 	# scale maximum to unity
 	data_points = data_points/np.amax(data_points)
 	###################################################
+	time_points = time_points * multiplier
 	return time_points, data_points
 
 ################################################################################
@@ -342,7 +346,7 @@ def ConvolutionFit(filepath,
 def FastConvolutionFit(filepath,
 						biexp, autolife,
 						passed_mu, passed_sigma,
-						fit_type = 'NLL'):
+						fit_type = 'NLL', no_plot = False):
 	time_points, data_points = ExtractData(datafilepath)
 	time_points, data_points = CutData(time_points, data_points)
 	peak_index = np.argmax(data_points)
@@ -399,97 +403,98 @@ def FastConvolutionFit(filepath,
 		test_set = np.unique(data_points[endpoint-60:endpoint])
 		test = np.abs(test_set[0] - test_set[1]) * peak_value > test_threshold
 	#
-	fig = plt.figure(figsize=(16,7))
-	gs = gridspec.GridSpec(1, 3, width_ratios=[0.8, 1.6, 1])
-	ax = list(map(plt.subplot, gs))
-	#
-	ax[0].plot(time_points, data_points, 'o', label='Data')
-	ax[0].plot( time_points[startpoint:endpoint],
-				data_points[startpoint:endpoint],
-				'x', label='Selected for fitting')
-	#ax[0].plot([time_points[peak_index], time_points[peak_index]],
-	#			[np.amin(data_points), np.amax(data_points)], '--k')
-	ax[0].set_xlabel('Time (ns)')
-	ax[0].set_ylabel('Intensity (A.U.)')
-	ax[0].legend()
-	#
-	ax[1].plot( time_points[startpoint:endpoint],
-				data_points[startpoint:endpoint],
-				marker = '.',
-				linestyle = 'none',
-				color = 'tab:blue',
-				label = 'Data')
-	if biexp:
+	if not no_plot:
+		fig = plt.figure(figsize=(16,7))
+		gs = gridspec.GridSpec(1, 3, width_ratios=[0.8, 1.6, 1])
+		ax = list(map(plt.subplot, gs))
+		#
+		ax[0].plot(time_points, data_points, 'o', label='Data')
+		ax[0].plot( time_points[startpoint:endpoint],
+					data_points[startpoint:endpoint],
+					'x', label='Selected for fitting')
+		#ax[0].plot([time_points[peak_index], time_points[peak_index]],
+		#			[np.amin(data_points), np.amax(data_points)], '--k')
+		ax[0].set_xlabel('Time (ns)')
+		ax[0].set_ylabel('Intensity (A.U.)')
+		ax[0].legend()
+		#
 		ax[1].plot( time_points[startpoint:endpoint],
-					fit_points[startpoint:endpoint],
+					data_points[startpoint:endpoint],
+					marker = '.',
+					linestyle = 'none',
+					color = 'tab:blue',
+					label = 'Data')
+		if biexp:
+			ax[1].plot( time_points[startpoint:endpoint],
+						fit_points[startpoint:endpoint],
+							linestyle = 'solid',
+							color = 'tab:red',
+							label = 'Full Fit')
+			a = fit_points[endpoint] / \
+						np.exp(-time_points[endpoint]/best_params[1])
+			ax[1].plot(time_points[peak_index:endpoint],
+					a*np.exp(-time_points[peak_index:endpoint]/best_params[1]),
+					linestyle = 'dashed',
+					color = 'tab:orange',
+					label = r'Signal Fit ($\tau = ' + \
+							'{0:.3f}ns'.format(best_params[1]) + r'$)')
+		else:
+			ax[1].plot( time_points[peak_index:endpoint],
+						fit_points[peak_index:endpoint],
 						linestyle = 'solid',
 						color = 'tab:red',
-						label = 'Full Fit')
-		a = fit_points[endpoint] / \
-					np.exp(-time_points[endpoint]/best_params[1])
-		ax[1].plot(time_points[peak_index:endpoint],
-				a*np.exp(-time_points[peak_index:endpoint]/best_params[1]),
-				linestyle = 'dashed',
-				color = 'tab:orange',
-				label = r'Signal Fit ($\tau = ' + \
-						'{0:.3f}ns'.format(best_params[1]) + r'$)')
-	else:
-		ax[1].plot( time_points[peak_index:endpoint],
-					fit_points[peak_index:endpoint],
-					linestyle = 'solid',
-					color = 'tab:red',
-					label = r'Fit ($\tau = ' + \
-						'{0:.3f}ns'.format(best_params[1]) + r'$)')
-	ax[1].set_yscale('log')
-	ax[1].set_xlabel('Time (ns)')
-#	lowest_point = np.argmin(data_points[peak_index:endpoint])
-#	ax[1].set_ylim([data_points[lowest_point] * 0.8,
-	ax[1].set_ylim([fit_points[endpoint] * 0.8,
-					data_points[peak_index] * 1.1])
-	ax[1].set_xlim([time_points[startpoint] - 0.2,
-					time_points[endpoint] + 0.1])
-	ax[1].legend()
-#	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns +/- {1:.3f}".format(
-#										fit_params[best_fit,1],err),
-	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns".format(best_params[1]),
-				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-				fontweight='bold', color='blue', transform=ax[1].transAxes)
-	if test:
-		ax[1].text(.4, .03, "Sparse Data!",
+						label = r'Fit ($\tau = ' + \
+							'{0:.3f}ns'.format(best_params[1]) + r'$)')
+		ax[1].set_yscale('log')
+		ax[1].set_xlabel('Time (ns)')
+	#	lowest_point = np.argmin(data_points[peak_index:endpoint])
+	#	ax[1].set_ylim([data_points[lowest_point] * 0.8,
+		ax[1].set_ylim([fit_points[endpoint] * 0.8,
+						data_points[peak_index] * 1.1])
+		ax[1].set_xlim([time_points[startpoint] - 0.2,
+						time_points[endpoint] + 0.1])
+		ax[1].legend()
+	#	ax[1].text(.04, .03, "Lifetime: {0:.3f} ns +/- {1:.3f}".format(
+	#										fit_params[best_fit,1],err),
+		ax[1].text(.04, .03, "Lifetime: {0:.3f} ns".format(best_params[1]),
 					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-					fontweight='bold', color='red', transform=ax[1].transAxes)
-	if biexp:
-		if autolife == 0.:
-			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
-														best_params[3]),
-				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-				fontweight='bold', color='blue', transform=ax[1].transAxes)
-		else:
-			ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
-														autolife),
-				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-				fontweight='bold', color='blue', transform=ax[1].transAxes)
-	#
-	ax[2].plot(time_points[endpoints], likelihoods, '.')
-	ax[2].plot([time_points[endpoint], time_points[endpoint]],
-				[np.amin(likelihoods), np.amax(likelihoods)],
-				'--k')
-#	if showfits:
-#		ax[2].plot(time_points[endpoints], fit_params[:,1], '.')
-	ax[2].text(.04, .09, "Time upper limit = {0:.2f}ns".format(
-										time_points[endpoint]),
-				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-				fontweight='bold', color='blue', transform=ax[2].transAxes)
-	ax[2].text(.04, .03,"Number of data points = {0:d}".format(
-										endpoints[best_fit]-peak_index),
-				bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
-				fontweight='bold', color='blue', transform=ax[2].transAxes)
-	ax[2].set_xlabel('Time Upper Bound (ns)')
-	ax[2].set_ylabel('Fit Measure')
-	#
-	fig.suptitle(filepath.name)
-	fig.savefig(filepath.with_suffix('.convofit.pdf'))
-	plt.close('all')
+					fontweight='bold', color='blue', transform=ax[1].transAxes)
+		if test:
+			ax[1].text(.4, .03, "Sparse Data!",
+						bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+						fontweight='bold', color='red', transform=ax[1].transAxes)
+		if biexp:
+			if autolife == 0.:
+				ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
+															best_params[3]),
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='blue', transform=ax[1].transAxes)
+			else:
+				ax[1].text(.04, .09, "Autofluorescence: {0:.3f} ns".format(
+															autolife),
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='blue', transform=ax[1].transAxes)
+		#
+		ax[2].plot(time_points[endpoints], likelihoods, '.')
+		ax[2].plot([time_points[endpoint], time_points[endpoint]],
+					[np.amin(likelihoods), np.amax(likelihoods)],
+					'--k')
+	#	if showfits:
+	#		ax[2].plot(time_points[endpoints], fit_params[:,1], '.')
+		ax[2].text(.04, .09, "Time upper limit = {0:.2f}ns".format(
+											time_points[endpoint]),
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='blue', transform=ax[2].transAxes)
+		ax[2].text(.04, .03,"Number of data points = {0:d}".format(
+											endpoints[best_fit]-peak_index),
+					bbox=dict(facecolor='wheat', alpha=1.0), fontsize=12,
+					fontweight='bold', color='blue', transform=ax[2].transAxes)
+		ax[2].set_xlabel('Time Upper Bound (ns)')
+		ax[2].set_ylabel('Fit Measure')
+		#
+		fig.suptitle(filepath.name)
+		fig.savefig(filepath.with_suffix('.convofit.pdf'))
+		plt.close('all')
 	print('\t'.join(['{0:2.12f}'.format(param) for param in best_params]))
 	return best_params, test
 #	return np.array([best_params[1], err]) # TODO: impliment error
@@ -518,6 +523,10 @@ if __name__ == "__main__":
 						const=True, default=False,
 						help = 'Do a fast convolution fit. ' + \
 				'(This requires uniformly temporally spaced data points.)')
+	parser.add_argument('-n', '--noplot', dest='no_plot',
+						action='store_const',
+						const=True, default=False,
+						help = 'don\'t output plots')
 	parser.add_argument('-x', '--xsqr', dest='fit_type',
 						action='store_const',
 						const='CHI', default='NLL',
@@ -554,7 +563,8 @@ if __name__ == "__main__":
 			parse_args.autolife[0],
 			parse_args.response[0],
 			parse_args.response[1],
-			parse_args.fit_type]
+			parse_args.fit_type
+			parse_args.no_plot]
 	if not parse_args.biexponential:
 		summary_data = np.zeros((0,4), dtype = float)
 	else:
